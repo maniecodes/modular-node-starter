@@ -1,23 +1,28 @@
-export const Permission = {
-  USER_READ_OWN: 'user:read:own',
-  USER_UPDATE_OWN: 'user:update:own',
-  USER_DELETE_OWN: 'user:delete:own',
+// src/core/rbac/permissions.ts
+export const Actions = {
+  CREATE: 'create',
+  READ: 'read',
+  UPDATE: 'update',
+  DELETE: 'delete',
 } as const;
 
-export type Permission = (typeof Permission)[keyof typeof Permission];
+export type Action = (typeof Actions)[keyof typeof Actions];
 
-export const Role = {
-  USER: 'user',
-  ADMIN: 'admin',
+export const Resources = {
+  USERS: 'users',
+  ROLES: 'roles',
+  PERMISSIONS: 'permissions',
 } as const;
 
-export type Role = (typeof Role)[keyof typeof Role];
+export type Resource = (typeof Resources)[keyof typeof Resources];
 
-export const RolePermissions: Record<Role, Permission[]> = {
-  [Role.USER]: [Permission.USER_READ_OWN, Permission.USER_UPDATE_OWN, Permission.USER_DELETE_OWN],
-  [Role.ADMIN]: Object.values(Permission) as Permission[],
-};
-
-export function hasPermission(role: Role, permission: Permission): boolean {
-  return RolePermissions[role]?.includes(permission) ?? false;
+/** Builds the canonical "action:resource" display string. */
+export function permissionKey(action: Action, resource: Resource): string {
+  return `${action}:${resource}`;
 }
+
+export const DefaultRoles = {
+  SUPER_ADMIN: 'super_admin',
+} as const;
+
+export type DefaultRole = (typeof DefaultRoles)[keyof typeof DefaultRoles];
