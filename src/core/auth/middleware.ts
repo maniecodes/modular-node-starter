@@ -2,8 +2,13 @@ import { Response, NextFunction } from 'express';
 import { AppError } from '@/core/errors/AppError';
 import { verifyAccessToken } from './jwt';
 import { AuthenticatedRequest } from '@/common/types';
+import { loadUserContext } from './user-context';
 
-export function requireAuth(req: AuthenticatedRequest, _res: Response, next: NextFunction): void {
+export async function requireAuth(
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith('Bearer ')) {
@@ -12,11 +17,22 @@ export function requireAuth(req: AuthenticatedRequest, _res: Response, next: Nex
 
   const token = authHeader.slice(7);
 
+  let payload: { sub: string; email: string };
   try {
-    const payload = verifyAccessToken(token);
-    req.user = { id: payload.sub, email: payload.email };
-    next();
+    payload = verifyAccessToken(token);
   } catch {
     throw new AppError('Invalid or expired token', 401);
   }
+
+  const context = await loadUserContext(payload.sub);
+  if (!context) throw new AppError('User not found', 401);
+  if (!context.isActive) throw new AppError('Account is deactivated', 403);
+
+  req.user = {
+    id: context.id,
+    email: context.email,
+    roles: context.roles,
+    permissions: context.permissions,
+  };
+  next();
 }

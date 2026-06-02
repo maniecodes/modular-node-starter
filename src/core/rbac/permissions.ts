@@ -1,9 +1,9 @@
-// src/core/rbac/permissions.ts
 export const Actions = {
   CREATE: 'create',
   READ: 'read',
   UPDATE: 'update',
   DELETE: 'delete',
+  ASSIGN: 'assign',
 } as const;
 
 export type Action = (typeof Actions)[keyof typeof Actions];
@@ -16,13 +16,17 @@ export const Resources = {
 
 export type Resource = (typeof Resources)[keyof typeof Resources];
 
-/** Builds the canonical "action:resource" display string. */
-export function permissionKey(action: Action, resource: Resource): string {
-  return `${action}:${resource}`;
+/**
+ * Builds the canonical "resource.action" permission string used in authorize().
+ * Example: permissionKey('users', 'read') → 'users.read'
+ */
+export function permissionKey(resource: Resource, action: Action): string {
+  return `${resource}.${action}`;
 }
 
 export const DefaultRoles = {
-  SUPER_ADMIN: 'super_admin',
+  USER: 'user',
+  ADMIN: 'admin',
 } as const;
 
 export type DefaultRole = (typeof DefaultRoles)[keyof typeof DefaultRoles];

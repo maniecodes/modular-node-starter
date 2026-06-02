@@ -11,6 +11,7 @@ import { sendSuccess } from '@/common/helpers/response';
 
 import authRoutes from '@/modules/auth/routes/auth.routes';
 import usersRoutes from '@/modules/users/routes/users.routes';
+import { rolesRouter, permissionsRouter } from '@/modules/roles/routes/roles.routes';
 
 const app = express();
 
@@ -33,6 +34,8 @@ app.get('/health', (_req, res) => {
 // Module routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', usersRoutes);
+app.use('/api/v1/roles', rolesRouter);
+app.use('/api/v1/permissions', permissionsRouter);
 
 // 404 handler
 app.use((_req, res) => {
