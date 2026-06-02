@@ -1,8 +1,8 @@
 // src/server.ts
 import app from './app';
-import { env } from '@/config/env';
-import { prisma } from '@/config/database';
-import { logger } from '@/shared/utils/logger';
+import { env } from '@/core/config/env';
+import { prisma } from '@/core/database/prisma';
+import { logger } from '@/common/utils/logger';
 
 async function bootstrap(): Promise<void> {
   await prisma.$connect();

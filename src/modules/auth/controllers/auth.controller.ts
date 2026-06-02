@@ -1,8 +1,7 @@
-// src/modules/auth/auth.controller.ts
 import { Request, Response } from 'express';
-import * as authService from './auth.service';
-import { LoginInput, RefreshInput, RegisterInput } from './auth.types';
-import { sendCreated, sendSuccess } from '@/shared/utils/response';
+import * as authService from '../services/auth.service';
+import { LoginInput, RefreshInput, RegisterInput } from '../auth.types';
+import { sendCreated, sendSuccess } from '@/common/helpers/response';
 
 export async function registerHandler(req: Request, res: Response): Promise<void> {
   const result = await authService.register(req.body as RegisterInput);

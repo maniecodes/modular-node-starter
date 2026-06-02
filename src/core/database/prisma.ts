@@ -1,7 +1,6 @@
-// src/config/database.ts
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { env } from './env';
+import { env } from '@/core/config/env';
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 

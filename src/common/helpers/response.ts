@@ -1,6 +1,5 @@
-// src/shared/utils/response.ts
 import { Response } from 'express';
-import { ApiResponse } from '@/shared/types';
+import { ApiResponse } from '@/common/types';
 
 export function sendSuccess<T>(
   res: Response,

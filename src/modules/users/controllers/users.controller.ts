@@ -1,10 +1,9 @@
-// src/modules/users/users.controller.ts
 import { Response } from 'express';
-import { AuthenticatedRequest } from '@/shared/types';
-import { sendNoContent, sendSuccess } from '@/shared/utils/response';
-import { AppError } from '@/shared/middleware/error.middleware';
-import * as usersService from './users.service';
-import { UpdateUserInput } from './users.types';
+import { AuthenticatedRequest } from '@/common/types';
+import { sendNoContent, sendSuccess } from '@/common/helpers/response';
+import { AppError } from '@/core/errors/AppError';
+import * as usersService from '../services/users.service';
+import { UpdateUserInput } from '../users.types';
 
 export async function getProfileHandler(req: AuthenticatedRequest, res: Response): Promise<void> {
   if (!req.user) throw new AppError('Unauthenticated', 401);
@@ -21,3 +20,11 @@ export async function updateProfileHandler(
   sendSuccess(res, updated, 'Profile updated');
 }
 
+export async function deleteAccountHandler(
+  req: AuthenticatedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) throw new AppError('Unauthenticated', 401);
+  await usersService.deleteAccount(req.user.id);
+  sendNoContent(res);
+}

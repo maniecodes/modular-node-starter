@@ -1,5 +1,4 @@
-// src/shared/utils/logger.ts
-import { env } from '@/config/env';
+import { env } from '@/core/config/env';
 
 type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 

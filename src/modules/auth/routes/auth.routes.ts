@@ -1,8 +1,7 @@
-// src/modules/auth/auth.routes.ts
 import { Router } from 'express';
-import { validate } from '@/shared/middleware/validate.middleware';
-import { loginSchema, refreshSchema, registerSchema } from './auth.validation';
-import { loginHandler, refreshHandler, registerHandler } from './auth.controller';
+import { validate } from '@/core/validation/validate.middleware';
+import { loginSchema, refreshSchema, registerSchema } from '../validators/auth.validator';
+import { loginHandler, refreshHandler, registerHandler } from '../controllers/auth.controller';
 
 const router = Router();
 

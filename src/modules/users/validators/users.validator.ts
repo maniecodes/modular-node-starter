@@ -1,4 +1,3 @@
-// src/modules/users/users.validation.ts
 import { z } from 'zod';
 
 export const updateUserSchema = z.object({

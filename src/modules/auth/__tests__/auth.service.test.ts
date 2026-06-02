@@ -1,11 +1,11 @@
 // src/modules/auth/__tests__/auth.service.test.ts
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { prisma } from '@/config/database';
-import { AppError } from '@/shared/middleware/error.middleware';
-import * as authService from '../auth.service';
+import { prisma } from '@/core/database/prisma';
+import { AppError } from '@/core/errors/AppError';
+import * as authService from '../services/auth.service';
 
-jest.mock('@/config/database', () => ({
+jest.mock('@/core/database/prisma', () => ({
   prisma: {
     user: {
       findUnique: jest.fn(),

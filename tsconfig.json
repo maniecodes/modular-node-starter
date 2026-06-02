@@ -19,9 +19,9 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/config/*": ["./src/config/*"],
-      "@/modules/*": ["./src/modules/*"],
-      "@/shared/*": ["./src/shared/*"]
+      "@/core/*": ["./src/core/*"],
+      "@/common/*": ["./src/common/*"],
+      "@/modules/*": ["./src/modules/*"]
     }
   },
   "include": ["src/**/*"],

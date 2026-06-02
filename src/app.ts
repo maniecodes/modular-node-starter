@@ -5,12 +5,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 
-import { env } from '@/config/env';
-import { errorMiddleware } from '@/shared/middleware/error.middleware';
-import { sendSuccess } from '@/shared/utils/response';
+import { env } from '@/core/config/env';
+import { errorHandler } from '@/core/errors/handler';
+import { sendSuccess } from '@/common/helpers/response';
 
-import authRoutes from '@/modules/auth/auth.routes';
-import usersRoutes from '@/modules/users/users.routes';
+import authRoutes from '@/modules/auth/routes/auth.routes';
+import usersRoutes from '@/modules/users/routes/users.routes';
 
 const app = express();
 
@@ -40,6 +40,6 @@ app.use((_req, res) => {
 });
 
 // Global error handler (must be last)
-app.use(errorMiddleware);
+app.use(errorHandler);
 
 export default app;

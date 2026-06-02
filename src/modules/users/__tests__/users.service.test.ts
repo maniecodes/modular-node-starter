@@ -1,9 +1,9 @@
 // src/modules/users/__tests__/users.service.test.ts
-import { prisma } from '@/config/database';
-import { AppError } from '@/shared/middleware/error.middleware';
-import * as usersService from '../users.service';
+import { prisma } from '@/core/database/prisma';
+import { AppError } from '@/core/errors/AppError';
+import * as usersService from '../services/users.service';
 
-jest.mock('@/config/database', () => ({
+jest.mock('@/core/database/prisma', () => ({
   prisma: {
     user: {
       findUnique: jest.fn(),
@@ -61,4 +61,3 @@ describe('usersService.updateProfile', () => {
     );
   });
 });
-

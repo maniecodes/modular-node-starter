@@ -1,16 +1,19 @@
-// src/modules/users/users.routes.ts
 import { Router } from 'express';
-import { requireAuth } from '@/shared/middleware/auth.middleware';
-import { validate } from '@/shared/middleware/validate.middleware';
-import { updateUserSchema } from './users.validation';
-import { deleteAccountHandler, getProfileHandler, updateProfileHandler } from './users.controller';
-import { AuthenticatedRequest } from '@/shared/types';
 import { Response, NextFunction } from 'express';
+import { requireAuth } from '@/core/auth/middleware';
+import { validate } from '@/core/validation/validate.middleware';
+import { updateUserSchema } from '../validators/users.validator';
+import {
+  deleteAccountHandler,
+  getProfileHandler,
+  updateProfileHandler,
+} from '../controllers/users.controller';
+import { AuthenticatedRequest } from '@/common/types';
 
 const router = Router();
 
-// Cast to satisfy Express typings with AuthenticatedRequest
 type AuthHandler = (req: AuthenticatedRequest, res: Response, next: NextFunction) => Promise<void>;
+
 const wrap =
   (fn: AuthHandler) =>
   (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
