@@ -1,4 +1,3 @@
-// src/modules/auth/auth.types.ts
 export interface RegisterInput {
   name: string;
   email: string;
@@ -10,12 +9,12 @@ export interface LoginInput {
   password: string;
 }
 
-export interface TokenPair {
-  accessToken: string;
+export interface RefreshInput {
   refreshToken: string;
 }
 
-export interface RefreshInput {
+export interface TokenPair {
+  accessToken: string;
   refreshToken: string;
 }
 
@@ -23,4 +22,9 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
+}
+
+export interface AuthResult {
+  user: AuthUser;
+  tokens: TokenPair;
 }
