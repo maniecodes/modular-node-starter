@@ -1,0 +1,26 @@
+{
+  "info": {
+    "_postman_id": "7ad02365-6e8a-4073-be6e-aac49f4b1e50",
+    "name": "Users",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "18b456b7-8ce4-4af2-bed0-df19e172c340"
+  },
+  "item": [
+    {
+      "name": "New Request",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://example.com",
+          "protocol": "https",
+          "host": [
+            "example",
+            "com"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
