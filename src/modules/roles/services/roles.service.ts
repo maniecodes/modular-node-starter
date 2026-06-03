@@ -1,4 +1,7 @@
 import { AppError } from '@/core/errors/AppError';
+import { securityEvent } from '@/core/audit/security-events';
+import { writeAuditLog } from '@/core/audit/audit-log.repository';
+import { invalidateCachedContext } from '@/core/cache/user-context-cache';
 import * as repo from '../repositories/roles.repository';
 import { CreatePermissionInput, CreateRoleInput } from '../roles.types';
 
@@ -58,6 +61,17 @@ export async function assignPermissionToRole(roleId: string, permissionId: strin
     }
     throw err;
   }
+
+  // Invalidate cache for all users who have this role so they see updated permissions immediately
+  const userIds = await repo.findUserIdsByRoleId(roleId);
+  userIds.forEach((uid) => invalidateCachedContext(uid));
+
+  securityEvent('permission_assigned', { roleId, permissionId, roleName: role.name });
+  writeAuditLog({
+    event: 'permission_assigned',
+    targetId: roleId,
+    metadata: { roleId, permissionId, roleName: role.name },
+  }).catch((err) => console.error('Audit log write failed:', err));
 }
 
 export async function revokePermissionFromRole(roleId: string, permissionId: string) {
@@ -69,6 +83,17 @@ export async function revokePermissionFromRole(roleId: string, permissionId: str
     }
     throw err;
   }
+
+  // Invalidate cache for all users who have this role
+  const userIds = await repo.findUserIdsByRoleId(roleId);
+  userIds.forEach((uid) => invalidateCachedContext(uid));
+
+  securityEvent('permission_revoked', { roleId, permissionId });
+  writeAuditLog({
+    event: 'permission_revoked',
+    targetId: roleId,
+    metadata: { roleId, permissionId },
+  }).catch((err) => console.error('Audit log write failed:', err));
 }
 
 // ─── User ↔ Role assignments ──────────────────────────────────────────────────
@@ -85,6 +110,16 @@ export async function assignRoleToUser(roleId: string, userId: string, assignedB
     }
     throw err;
   }
+
+  invalidateCachedContext(userId);
+
+  securityEvent('role_assigned', { userId, roleId, roleName: role.name, assignedBy });
+  writeAuditLog({
+    event: 'role_assigned',
+    actorId: assignedBy,
+    targetId: userId,
+    metadata: { roleId, roleName: role.name },
+  }).catch((err) => console.error('Audit log write failed:', err));
 }
 
 export async function revokeRoleFromUser(roleId: string, userId: string) {
@@ -96,6 +131,15 @@ export async function revokeRoleFromUser(roleId: string, userId: string) {
     }
     throw err;
   }
+
+  invalidateCachedContext(userId);
+
+  securityEvent('role_revoked', { userId, roleId });
+  writeAuditLog({
+    event: 'role_revoked',
+    targetId: userId,
+    metadata: { roleId },
+  }).catch((err) => console.error('Audit log write failed:', err));
 }
 
 export async function getUserRoles(userId: string) {

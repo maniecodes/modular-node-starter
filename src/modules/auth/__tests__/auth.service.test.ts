@@ -3,18 +3,22 @@ import { AppError } from '@/core/errors/AppError';
 import * as authService from '../services/auth.service';
 import * as authRepository from '../repositories/auth.repository';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '@/core/auth/jwt';
+import * as loginProtection from '@/core/auth/login-protection';
 
 // Mock at the repository boundary — service tests must not know Prisma internals
 jest.mock('../repositories/auth.repository');
 // Mock JWT utility functions directly — avoids reimplementing crypto in tests
 jest.mock('@/core/auth/jwt');
 jest.mock('bcryptjs');
+// Mock login protection so tests run without in-memory state leaking
+jest.mock('@/core/auth/login-protection');
 
 const mockRepo = authRepository as jest.Mocked<typeof authRepository>;
 const mockSignAccess = signAccessToken as jest.MockedFunction<typeof signAccessToken>;
 const mockSignRefresh = signRefreshToken as jest.MockedFunction<typeof signRefreshToken>;
 const mockVerifyRefresh = verifyRefreshToken as jest.MockedFunction<typeof verifyRefreshToken>;
 const mockBcrypt = bcrypt as jest.Mocked<typeof bcrypt>;
+const mockLoginProtection = loginProtection as jest.Mocked<typeof loginProtection>;
 
 const sampleUser = { id: 'user-1', name: 'Alice', email: 'alice@example.com' };
 const dbUserWithPassword = { ...sampleUser, password: 'hashed', isActive: true };
@@ -35,7 +39,11 @@ function mockIssueRefreshToken(refreshTokenValue = 'refresh-token') {
   mockRepo.storeRefreshToken.mockResolvedValueOnce(undefined as never);
 }
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  // Default: account is not locked — individual tests override this as needed
+  mockLoginProtection.isLocked.mockReturnValue(false);
+});
 
 // ---------------------------------------------------------------------------
 // register
@@ -140,6 +148,48 @@ describe('authService.login', () => {
     await authService.login({ email: 'alice@example.com', password: 'Password1' });
 
     expect(mockRepo.storeRefreshToken).toHaveBeenCalledWith('user-1', 'refresh', expect.any(Date));
+  });
+
+  it('throws 429 when the account is locked out', async () => {
+    mockLoginProtection.isLocked.mockReturnValue(true);
+
+    await expect(
+      authService.login({ email: 'alice@example.com', password: 'Password1' }),
+    ).rejects.toThrow(new AppError('Too many failed login attempts. Please try again later.', 429));
+
+    expect(mockRepo.findUserByEmail).not.toHaveBeenCalled();
+  });
+
+  it('records a failed attempt when credentials are wrong', async () => {
+    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
+
+    await expect(
+      authService.login({ email: 'alice@example.com', password: 'wrong' }),
+    ).rejects.toThrow();
+
+    expect(mockLoginProtection.recordFailedAttempt).toHaveBeenCalledWith('alice@example.com');
+  });
+
+  it('records a failed attempt when user is not found', async () => {
+    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
+
+    await expect(
+      authService.login({ email: 'nobody@example.com', password: 'pass' }),
+    ).rejects.toThrow();
+
+    expect(mockLoginProtection.recordFailedAttempt).toHaveBeenCalledWith('nobody@example.com');
+  });
+
+  it('clears failed attempts on successful login', async () => {
+    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+    mockIssueRefreshToken('refresh');
+    mockSignAccess.mockReturnValueOnce('access');
+
+    await authService.login({ email: 'alice@example.com', password: 'Password1' });
+
+    expect(mockLoginProtection.clearAttempts).toHaveBeenCalledWith('alice@example.com');
   });
 });
 

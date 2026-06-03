@@ -84,3 +84,16 @@ model RefreshToken {
 
     @@map("refresh_tokens")
 }
+
+model AuditLog {
+    id        String   @id @default(cuid())
+    event     String // e.g. 'role_assigned', 'role_revoked', 'permission_assigned'
+    actorId   String? // userId who triggered the change (null for system actions)
+    targetId  String? // primary affected entity (userId for user-role, roleId for role-permission)
+    metadata  Json? // flexible extra context (roleName, permissionKey, etc.)
+    createdAt DateTime @default(now())
+
+    @@index([targetId])
+    @@index([event])
+    @@map("audit_logs")
+}

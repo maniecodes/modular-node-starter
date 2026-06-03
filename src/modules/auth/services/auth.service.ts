@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import { env } from '@/core/config/env';
 import { AppError } from '@/core/errors/AppError';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '@/core/auth/jwt';
+import { securityEvent } from '@/core/audit/security-events';
+import { isLocked, recordFailedAttempt, clearAttempts } from '@/core/auth/login-protection';
 import * as authRepository from '../repositories/auth.repository';
 import { AuthResult, AuthUser, LoginInput, RegisterInput, TokenPair } from '../auth.types';
 
@@ -38,29 +40,58 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
   const { token: refreshToken } = await issueRefreshToken(user.id);
   const accessToken = signAccessToken({ sub: user.id, email: user.email });
 
+  securityEvent('register_success', { userId: user.id, email: user.email });
+
   return { user: buildSafeUser(user), tokens: { accessToken, refreshToken } };
 }
 
 export async function login(input: LoginInput): Promise<AuthResult> {
+  // Check lockout before touching the DB — avoids unnecessary load under brute-force
+  if (isLocked(input.email)) {
+    securityEvent('login_locked', { email: input.email });
+    throw new AppError('Too many failed login attempts. Please try again later.', 429);
+  }
+
   const user = await authRepository.findUserByEmail(input.email);
 
-  // Intentionally vague — don't reveal whether the email exists
-  if (!user) throw new AppError('Invalid credentials', 401);
+  if (!user) {
+    recordFailedAttempt(input.email);
+    securityEvent('login_failure', { email: input.email, reason: 'user_not_found' });
+    throw new AppError('Invalid credentials', 401);
+  }
 
-  if (!user.isActive) throw new AppError('Account is deactivated', 403);
+  if (!user.isActive) {
+    securityEvent('login_failure', {
+      email: input.email,
+      userId: user.id,
+      reason: 'account_deactivated',
+    });
+    throw new AppError('Account is deactivated', 403);
+  }
 
   const isValid = await bcrypt.compare(input.password, user.password);
-  if (!isValid) throw new AppError('Invalid credentials', 401);
+  if (!isValid) {
+    recordFailedAttempt(input.email);
+    securityEvent('login_failure', {
+      email: input.email,
+      userId: user.id,
+      reason: 'wrong_password',
+    });
+    throw new AppError('Invalid credentials', 401);
+  }
+
+  clearAttempts(input.email);
 
   const safeUser = buildSafeUser(user);
   const { token: refreshToken } = await issueRefreshToken(user.id);
   const accessToken = signAccessToken({ sub: user.id, email: user.email });
 
+  securityEvent('login_success', { userId: user.id, email: user.email });
+
   return { user: safeUser, tokens: { accessToken, refreshToken } };
 }
 
 export async function refreshTokens(rawToken: string): Promise<TokenPair> {
-  // 1. Verify JWT signature first — cheap, no DB hit
   let payload: { sub: string };
   try {
     payload = verifyRefreshToken(rawToken);
@@ -68,34 +99,33 @@ export async function refreshTokens(rawToken: string): Promise<TokenPair> {
     throw new AppError('Invalid or expired refresh token', 401);
   }
 
-  // 2. Consume the token from DB — atomic delete prevents replay
   const record = await authRepository.consumeRefreshToken(rawToken);
-  if (!record) throw new AppError('Refresh token has already been used or revoked', 401);
+  if (!record) {
+    securityEvent('refresh_replay_denied', { userId: payload.sub });
+    throw new AppError('Refresh token has already been used or revoked', 401);
+  }
 
-  // 3. Verify the user is still valid
   const user = await authRepository.findUserById(payload.sub);
   if (!user) throw new AppError('User not found', 401);
   if (!user.isActive) throw new AppError('Account is deactivated', 403);
 
-  // 4. Issue a new pair (rotation: old token is already deleted)
   const { token: newRefreshToken } = await issueRefreshToken(user.id);
   const accessToken = signAccessToken({ sub: user.id, email: user.email });
+
+  securityEvent('refresh_success', { userId: user.id });
 
   return { accessToken, refreshToken: newRefreshToken };
 }
 
-/** Revokes a single refresh token. Safe to call even if the token is already gone. */
 export async function logout(rawToken: string): Promise<void> {
-  // Validate the token structure first, but ignore expiry — a user should be
-  // able to log out even with an expired token sitting in their client.
   try {
     verifyRefreshToken(rawToken);
   } catch (err: unknown) {
-    // Allow logout even for expired tokens — just not for malformed ones
     const message = err instanceof Error ? err.message : '';
     if (!message.includes('expired')) {
       throw new AppError('Invalid refresh token', 400);
     }
   }
   await authRepository.revokeRefreshToken(rawToken);
+  securityEvent('logout_success', {});
 }

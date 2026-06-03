@@ -141,7 +141,14 @@ export async function findUserPermissions(userId: string): Promise<string[]> {
   ];
 }
 
-// ─── Hard deletes (cascade clears junction tables via schema onDelete: Cascade) ─
+export async function findUserIdsByRoleId(roleId: string): Promise<string[]> {
+  const records = await prisma.userRole.findMany({
+    where: { roleId },
+    select: { userId: true },
+  });
+  return records.map((r) => r.userId);
+}
+
 
 export async function deleteRoleById(id: string) {
   return prisma.role.delete({ where: { id } });
