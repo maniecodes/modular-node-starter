@@ -7,6 +7,7 @@ import morgan from 'morgan';
 
 import { env } from '@/core/config/env';
 import { errorHandler } from '@/core/errors/handler';
+import { apiLimiter, authLimiter } from '@/core/middleware/rate-limit';
 import { sendSuccess } from '@/common/helpers/response';
 
 import authRoutes from '@/modules/auth/routes/auth.routes';
@@ -32,10 +33,10 @@ app.get('/health', (_req, res) => {
 });
 
 // Module routes
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/users', usersRoutes);
-app.use('/api/v1/roles', rolesRouter);
-app.use('/api/v1/permissions', permissionsRouter);
+app.use('/api/v1/auth', authLimiter, authRoutes);
+app.use('/api/v1/users', apiLimiter, usersRoutes);
+app.use('/api/v1/roles', apiLimiter, rolesRouter);
+app.use('/api/v1/permissions', apiLimiter, permissionsRouter);
 
 // 404 handler
 app.use((_req, res) => {

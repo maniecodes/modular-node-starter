@@ -18,3 +18,9 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
   const tokens = await authService.refreshTokens(refreshToken);
   sendSuccess(res, tokens, 'Tokens refreshed');
 }
+
+export async function logoutHandler(req: Request, res: Response): Promise<void> {
+  const { refreshToken } = req.body as RefreshInput;
+  await authService.logout(refreshToken);
+  sendSuccess(res, null, 'Logged out successfully');
+}

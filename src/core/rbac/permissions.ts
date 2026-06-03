@@ -16,10 +16,6 @@ export const Resources = {
 
 export type Resource = (typeof Resources)[keyof typeof Resources];
 
-/**
- * Builds the canonical "resource.action" permission string used in authorize().
- * Example: permissionKey('users', 'read') → 'users.read'
- */
 export function permissionKey(resource: Resource, action: Action): string {
   return `${resource}.${action}`;
 }

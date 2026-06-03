@@ -25,7 +25,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   return { sub: payload.sub!, email: payload.email as string };
 }
 
-export function verifyRefreshToken(token: string): { sub: string } {
+export function verifyRefreshToken(token: string): { sub: string; exp: number } {
   const payload = jwt.verify(token, env.JWT_REFRESH_SECRET) as jwt.JwtPayload;
-  return { sub: payload.sub! };
+  return { sub: payload.sub!, exp: payload.exp! };
 }

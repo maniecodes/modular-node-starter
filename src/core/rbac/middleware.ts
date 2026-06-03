@@ -2,10 +2,6 @@ import { Response, NextFunction } from 'express';
 import { AppError } from '@/core/errors/AppError';
 import { AuthenticatedRequest } from '@/common/types';
 
-/**
- * Requires the authenticated user to have one of the given role names.
- * Works alongside requireAuth — user must be authenticated first.
- */
 export function requireRole(...roles: string[]) {
   return (req: AuthenticatedRequest, _res: Response, next: NextFunction): void => {
     if (!req.user) {
@@ -20,12 +16,6 @@ export function requireRole(...roles: string[]) {
   };
 }
 
-/**
- * Requires the authenticated user to have a specific permission.
- * Permission format: "resource.action" — e.g. authorize('users.read')
- *
- * Must be used after requireAuth, which loads permissions from DB.
- */
 export function authorize(permission: string) {
   return (req: AuthenticatedRequest, _res: Response, next: NextFunction): void => {
     if (!req.user) throw new AppError('Unauthenticated', 401);

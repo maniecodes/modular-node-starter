@@ -94,4 +94,21 @@ describe('requireAuth', () => {
 
     expect(mockLoadContext).toHaveBeenCalledWith('user-42');
   });
+
+  it('throws 401 when the Bearer token is an empty string', async () => {
+    // Authorization: "Bearer " with nothing after it
+    mockVerify.mockImplementation(() => {
+      throw new Error('jwt malformed');
+    });
+    await expect(requireAuth(makeReq('Bearer '), res, next)).rejects.toMatchObject({
+      statusCode: 401,
+    });
+  });
+
+  it('propagates unexpected errors thrown by loadUserContext', async () => {
+    mockVerify.mockReturnValue(validPayload);
+    mockLoadContext.mockRejectedValueOnce(new Error('DB connection lost'));
+
+    await expect(requireAuth(makeReq(), res, next)).rejects.toThrow('DB connection lost');
+  });
 });
