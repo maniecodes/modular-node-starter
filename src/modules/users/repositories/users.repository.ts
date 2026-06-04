@@ -4,7 +4,7 @@ import { UpdateUserInput } from '../users.types';
 export async function findById(id: string) {
   return prisma.user.findUnique({
     where: { id },
-    select: { id: true, name: true, email: true, createdAt: true },
+    select: { id: true, firstName: true, lastName: true, email: true, phone: true, createdAt: true },
   });
 }
 
@@ -12,7 +12,7 @@ export async function updateById(id: string, data: UpdateUserInput) {
   return prisma.user.update({
     where: { id },
     data,
-    select: { id: true, name: true, email: true, createdAt: true },
+    select: { id: true, firstName: true, lastName: true, email: true, phone: true, createdAt: true },
   });
 }
 

@@ -1,3 +1,22 @@
+jest.mock('@/core/database/prisma', () => {
+  const mockPrisma = {
+    loginAttempt: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+      update: jest.fn(),
+      deleteMany: jest.fn(),
+    },
+    $executeRaw: jest.fn(),
+    $transaction: jest.fn(),
+  };
+
+  mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) =>
+    callback(mockPrisma),
+  );
+
+  return { prisma: mockPrisma };
+});
+
 import {
   isLocked,
   recordFailedAttempt,
@@ -5,81 +24,127 @@ import {
   getAttemptCount,
   _resetStore,
 } from '../login-protection';
+import { prisma } from '@/core/database/prisma';
 
-beforeEach(() => _resetStore());
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+const mockTransaction = mockPrisma.$transaction as jest.Mock;
+const mockFindUnique = mockPrisma.loginAttempt.findUnique as unknown as jest.Mock;
+const mockUpsert = mockPrisma.loginAttempt.upsert as unknown as jest.Mock;
+const mockUpdate = mockPrisma.loginAttempt.update as unknown as jest.Mock;
+const mockDeleteMany = mockPrisma.loginAttempt.deleteMany as unknown as jest.Mock;
+
+beforeEach(async () => {
+  jest.clearAllMocks();
+  mockTransaction.mockImplementation(async (callback) => callback(mockPrisma as never));
+  mockDeleteMany.mockResolvedValue({ count: 0 } as never);
+  await _resetStore();
+});
 
 describe('login-protection', () => {
   describe('isLocked', () => {
-    it('returns false for an unknown email', () => {
-      expect(isLocked('unknown@example.com')).toBe(false);
+    it('returns false for an unknown email', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+
+      await expect(isLocked('unknown@example.com')).resolves.toBe(false);
     });
 
-    it('returns false when fewer than 5 attempts have been recorded', () => {
-      recordFailedAttempt('user@example.com');
-      recordFailedAttempt('user@example.com');
-      expect(isLocked('user@example.com')).toBe(false);
+    it('returns false when there is no active lock', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        identifier: 'user@example.com',
+        count: 2,
+        firstAttemptAt: new Date(),
+        lockedUntil: null,
+        updatedAt: new Date(),
+      } as never);
+
+      await expect(isLocked('user@example.com')).resolves.toBe(false);
     });
 
-    it('returns true after exactly 5 failed attempts', () => {
-      for (let i = 0; i < 5; i++) {
-        recordFailedAttempt('user@example.com');
-      }
-      expect(isLocked('user@example.com')).toBe(true);
-    });
+    it('returns true when lockedUntil is in the future', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        identifier: 'user@example.com',
+        count: 5,
+        firstAttemptAt: new Date(),
+        lockedUntil: new Date(Date.now() + 60_000),
+        updatedAt: new Date(),
+      } as never);
 
-    it('returns true after more than 5 failed attempts', () => {
-      for (let i = 0; i < 7; i++) {
-        recordFailedAttempt('user@example.com');
-      }
-      expect(isLocked('user@example.com')).toBe(true);
+      await expect(isLocked('user@example.com')).resolves.toBe(true);
     });
   });
 
   describe('recordFailedAttempt', () => {
-    it('increments the attempt count', () => {
-      recordFailedAttempt('user@example.com');
-      recordFailedAttempt('user@example.com');
-      expect(getAttemptCount('user@example.com')).toBe(2);
+    it('creates a new record when none exists', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+      mockUpsert.mockResolvedValueOnce({} as never);
+
+      await recordFailedAttempt('user@example.com');
+
+      expect(mockUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { identifier: 'user@example.com' },
+          create: expect.objectContaining({ identifier: 'user@example.com', count: 1 }),
+        }),
+      );
     });
 
-    it('treats each email independently', () => {
-      recordFailedAttempt('a@example.com');
-      recordFailedAttempt('b@example.com');
-      recordFailedAttempt('b@example.com');
+    it('increments and locks when threshold is reached', async () => {
+      const firstAttemptAt = new Date();
+      mockFindUnique.mockResolvedValueOnce({
+        identifier: 'user@example.com',
+        count: 4,
+        firstAttemptAt,
+        lockedUntil: null,
+        updatedAt: firstAttemptAt,
+      } as never);
+      mockUpdate.mockResolvedValueOnce({} as never);
 
-      expect(getAttemptCount('a@example.com')).toBe(1);
-      expect(getAttemptCount('b@example.com')).toBe(2);
+      await recordFailedAttempt('user@example.com');
+
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { identifier: 'user@example.com' },
+          data: expect.objectContaining({ count: 5, lockedUntil: expect.any(Date) }),
+        }),
+      );
     });
   });
 
   describe('clearAttempts', () => {
-    it('resets the attempt count to zero', () => {
-      recordFailedAttempt('user@example.com');
-      recordFailedAttempt('user@example.com');
-      clearAttempts('user@example.com');
+    it('deletes any stored record for the identifier', async () => {
+      mockDeleteMany.mockResolvedValueOnce({ count: 1 } as never);
 
-      expect(getAttemptCount('user@example.com')).toBe(0);
-      expect(isLocked('user@example.com')).toBe(false);
+      await clearAttempts('user@example.com');
+
+      expect(mockDeleteMany).toHaveBeenCalledWith({
+        where: { identifier: 'user@example.com' },
+      });
     });
 
-    it('unlocks an account that had been locked', () => {
-      for (let i = 0; i < 5; i++) {
-        recordFailedAttempt('user@example.com');
-      }
-      expect(isLocked('user@example.com')).toBe(true);
+    it('is a no-op for an email with no recorded attempts', async () => {
+      mockDeleteMany.mockResolvedValueOnce({ count: 0 } as never);
 
-      clearAttempts('user@example.com');
-      expect(isLocked('user@example.com')).toBe(false);
-    });
-
-    it('is a no-op for an email with no recorded attempts', () => {
-      expect(() => clearAttempts('nobody@example.com')).not.toThrow();
+      await expect(clearAttempts('nobody@example.com')).resolves.toBeUndefined();
     });
   });
 
   describe('getAttemptCount', () => {
-    it('returns 0 for an email with no attempts', () => {
-      expect(getAttemptCount('nobody@example.com')).toBe(0);
+    it('returns 0 for an email with no attempts', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+
+      await expect(getAttemptCount('nobody@example.com')).resolves.toBe(0);
+    });
+
+    it('returns the stored count for a known identifier', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        identifier: 'user@example.com',
+        count: 2,
+        firstAttemptAt: new Date(),
+        lockedUntil: null,
+        updatedAt: new Date(),
+      } as never);
+
+      await expect(getAttemptCount('user@example.com')).resolves.toBe(2);
     });
   });
 });

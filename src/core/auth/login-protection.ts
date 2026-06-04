@@ -1,37 +1,26 @@
-/**
- * Per-account login attempt tracker with automatic lockout.
- *
- * After MAX_ATTEMPTS consecutive failures within the rolling WINDOW_MS period,
- * the account is locked for LOCKOUT_MS. A successful login clears the record.
- *
- * ⚠️  This is an in-memory implementation. It resets on process restart and
- *      does not work across multiple server instances. For production use at
- *      scale, replace the Map with a Redis-backed store (the interface is
- *      identical — only swapStore() needs changing).
- */
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/core/database/prisma';
 
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
-interface AttemptRecord {
-  count: number;
-  firstAttemptAt: number;
-  lockedUntil: number | null;
+async function lockAttemptScope(
+  tx: Prisma.TransactionClient,
+  identifier: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`login-attempt:${identifier}`}))`;
 }
 
-const store = new Map<string, AttemptRecord>();
-
 /**
- * Returns true if the given email is currently locked out.
- * Automatically expires stale lockouts.
+ * Returns true if the given identifier is currently locked out.
  */
-export function isLocked(email: string): boolean {
-  const record = store.get(email);
+export async function isLocked(identifier: string): Promise<boolean> {
+  const record = await prisma.loginAttempt.findUnique({ where: { identifier } });
   if (!record?.lockedUntil) return false;
 
-  if (Date.now() >= record.lockedUntil) {
-    store.delete(email);
+  if (Date.now() >= record.lockedUntil.getTime()) {
+    await prisma.loginAttempt.deleteMany({ where: { identifier } });
     return false;
   }
 
@@ -39,33 +28,45 @@ export function isLocked(email: string): boolean {
 }
 
 /** Records a failed login attempt. Triggers a lockout after MAX_ATTEMPTS. */
-export function recordFailedAttempt(email: string): void {
-  const now = Date.now();
-  const existing = store.get(email);
+export async function recordFailedAttempt(identifier: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await lockAttemptScope(tx, identifier);
 
-  if (!existing || now - existing.firstAttemptAt > WINDOW_MS) {
-    store.set(email, { count: 1, firstAttemptAt: now, lockedUntil: null });
-    return;
-  }
+    const now = new Date();
+    const existing = await tx.loginAttempt.findUnique({ where: { identifier } });
 
-  existing.count += 1;
+    if (!existing || now.getTime() - existing.firstAttemptAt.getTime() > WINDOW_MS) {
+      await tx.loginAttempt.upsert({
+        where: { identifier },
+        update: { count: 1, firstAttemptAt: now, lockedUntil: null },
+        create: { identifier, count: 1, firstAttemptAt: now, lockedUntil: null },
+      });
+      return;
+    }
 
-  if (existing.count >= MAX_ATTEMPTS) {
-    existing.lockedUntil = now + LOCKOUT_MS;
-  }
+    const nextCount = existing.count + 1;
+    await tx.loginAttempt.update({
+      where: { identifier },
+      data: {
+        count: nextCount,
+        lockedUntil: nextCount >= MAX_ATTEMPTS ? new Date(now.getTime() + LOCKOUT_MS) : existing.lockedUntil,
+      },
+    });
+  });
 }
 
-/** Clears all failed attempt records for an email (call on successful login). */
-export function clearAttempts(email: string): void {
-  store.delete(email);
+/** Clears all failed attempt records for an identifier (call on successful login). */
+export async function clearAttempts(identifier: string): Promise<void> {
+  await prisma.loginAttempt.deleteMany({ where: { identifier } });
 }
 
-/** Returns the number of failed attempts recorded for an email. */
-export function getAttemptCount(email: string): number {
-  return store.get(email)?.count ?? 0;
+/** Returns the number of failed attempts recorded for an identifier. */
+export async function getAttemptCount(identifier: string): Promise<number> {
+  const record = await prisma.loginAttempt.findUnique({ where: { identifier } });
+  return record?.count ?? 0;
 }
 
 /** Exposed for tests only — resets the entire store. */
-export function _resetStore(): void {
-  store.clear();
+export async function _resetStore(): Promise<void> {
+  await prisma.loginAttempt.deleteMany();
 }

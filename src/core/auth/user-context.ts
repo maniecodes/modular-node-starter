@@ -3,7 +3,8 @@ import { getCachedContext, setCachedContext } from '@/core/cache/user-context-ca
 
 export interface UserContext {
   id: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
   isActive: boolean;
   roles: string[];
   permissions: string[];
@@ -11,9 +12,8 @@ export interface UserContext {
 
 /**
  * Loads a user with all their roles and permissions in a single query.
- * Results are cached in-memory for 60 seconds to avoid a DB hit on every
- * authenticated request. Call invalidateCachedContext(userId) after any
- * mutation that should take effect immediately.
+ * The cache shim is currently disabled so authorization-sensitive reads stay
+ * consistent across multiple app instances.
  *
  * Returns null if the user does not exist.
  */
@@ -25,6 +25,7 @@ export async function loadUserContext(userId: string): Promise<UserContext | nul
     select: {
       id: true,
       email: true,
+      phone: true,
       isActive: true,
       roles: {
         select: {
@@ -60,6 +61,7 @@ export async function loadUserContext(userId: string): Promise<UserContext | nul
   const context: UserContext = {
     id: user.id,
     email: user.email,
+    phone: user.phone,
     isActive: user.isActive,
     roles,
     permissions,

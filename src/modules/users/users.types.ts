@@ -1,11 +1,14 @@
 // src/modules/users/users.types.ts
 export interface UpdateUserInput {
-  name?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 export interface UserProfile {
   id: string;
-  name: string;
-  email: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
   createdAt: Date;
 }

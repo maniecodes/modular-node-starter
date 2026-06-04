@@ -17,7 +17,8 @@ const mockPrismaUser = prisma.user as jest.Mocked<typeof prisma.user>;
 
 const sampleUser = {
   id: 'user-1',
-  name: 'Alice',
+  firstName: 'Alice',
+  lastName: 'Smith',
   email: 'alice@example.com',
   createdAt: new Date(),
 };
@@ -46,17 +47,17 @@ describe('usersService.getProfile', () => {
 describe('usersService.updateProfile', () => {
   it('updates and returns the user', async () => {
     mockPrismaUser.findUnique.mockResolvedValueOnce(sampleUser as never);
-    mockPrismaUser.update.mockResolvedValueOnce({ ...sampleUser, name: 'Bob' } as never);
+    mockPrismaUser.update.mockResolvedValueOnce({ ...sampleUser, firstName: 'Bob' } as never);
 
-    const result = await usersService.updateProfile('user-1', { name: 'Bob' });
+    const result = await usersService.updateProfile('user-1', { firstName: 'Bob' });
 
-    expect(result.name).toBe('Bob');
+    expect(result.firstName).toBe('Bob');
   });
 
   it('throws 404 when user does not exist', async () => {
     mockPrismaUser.findUnique.mockResolvedValueOnce(null);
 
-    await expect(usersService.updateProfile('unknown', { name: 'Bob' })).rejects.toThrow(
+    await expect(usersService.updateProfile('unknown', { firstName: 'Bob' })).rejects.toThrow(
       new AppError('User not found', 404),
     );
   });

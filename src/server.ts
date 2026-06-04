@@ -14,15 +14,14 @@ async function bootstrap(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info(`${signal} received — shutting down gracefully`);
-    server.close(async () => {
-      await prisma.$disconnect();
-      logger.info('Database disconnected. Bye!');
-      process.exit(0);
-    });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await prisma.$disconnect();
+    logger.info('Database disconnected. Bye!');
+    process.exit(0);
   };
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
 bootstrap().catch((err: unknown) => {

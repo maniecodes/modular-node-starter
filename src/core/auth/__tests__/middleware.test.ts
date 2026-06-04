@@ -22,6 +22,7 @@ const validPayload = { sub: 'user-1', email: 'alice@example.com' };
 const fullContext = {
   id: 'user-1',
   email: 'alice@example.com',
+  phone: null,
   isActive: true,
   roles: ['admin'],
   permissions: ['users.read', 'roles.create'],
@@ -80,6 +81,7 @@ describe('requireAuth', () => {
     expect(req.user).toEqual({
       id: 'user-1',
       email: 'alice@example.com',
+      phone: undefined,
       roles: ['admin'],
       permissions: ['users.read', 'roles.create'],
     });

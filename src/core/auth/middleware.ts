@@ -17,7 +17,7 @@ export async function requireAuth(
 
   const token = authHeader.slice(7);
 
-  let payload: { sub: string; email: string };
+  let payload: { sub: string; email?: string; phone?: string };
   try {
     payload = verifyAccessToken(token);
   } catch {
@@ -30,7 +30,8 @@ export async function requireAuth(
 
   req.user = {
     id: context.id,
-    email: context.email,
+    email: context.email ?? undefined,
+    phone: context.phone ?? undefined,
     roles: context.roles,
     permissions: context.permissions,
   };

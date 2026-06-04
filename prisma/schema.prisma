@@ -7,14 +7,29 @@ datasource db {
     provider = "postgresql"
 }
 
+enum OtpType {
+    EMAIL
+    PHONE
+}
+
+enum OtpPurpose {
+    REGISTRATION
+    PASSWORD_RESET
+}
+
 model User {
-    id        String   @id @default(cuid())
-    name      String
-    email     String   @unique
-    password  String
-    isActive  Boolean  @default(true)
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+    id              String   @id @default(cuid())
+    firstName       String
+    lastName        String
+    email           String?  @unique
+    phone           String?  @unique
+    password        String
+    isActive        Boolean  @default(true)
+    isVerified      Boolean  @default(false)
+    isEmailVerified Boolean  @default(false)
+    isPhoneVerified Boolean  @default(false)
+    createdAt       DateTime @default(now())
+    updatedAt       DateTime @updatedAt
 
     roles         UserRole[]
     refreshTokens RefreshToken[]
@@ -96,4 +111,31 @@ model AuditLog {
     @@index([targetId])
     @@index([event])
     @@map("audit_logs")
+}
+
+model LoginAttempt {
+    identifier     String    @id
+    count          Int
+    firstAttemptAt DateTime
+    lockedUntil    DateTime?
+    updatedAt      DateTime  @updatedAt
+
+    @@map("login_attempts")
+}
+
+model OtpCode {
+    id                 String     @id @default(cuid())
+    target             String
+    type               OtpType
+    purpose            OtpPurpose
+    code               String
+    expiresAt          DateTime
+    usedAt             DateTime?
+    invalidatedAt      DateTime?
+    requestedIp        String?
+    requestedUserAgent String?
+    createdAt          DateTime   @default(now())
+
+    @@index([target, type, purpose])
+    @@map("otp_codes")
 }

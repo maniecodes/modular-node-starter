@@ -3,11 +3,12 @@
  * Run once after first migration: npm run db:seed
  *
  * Roles created:
- *   user  — standard authenticated user (read/update/delete own data)
- *   admin — full access to all resources
+ *   user - standard authenticated user (read/update/delete own data)
+ *   super_admin - full access to all resources
  */
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import bcrypt from 'bcryptjs';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -38,7 +39,6 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 async function main() {
   console.log('Seeding roles and permissions...\n');
 
-  // Upsert all permissions
   const created = await Promise.all(
     PERMISSIONS.map((p) =>
       prisma.permission.upsert({
@@ -50,37 +50,101 @@ async function main() {
   );
 
   const permMap = new Map(created.map((p) => [`${p.resource}.${p.action}`, p.id]));
-  console.log(`  ✓ ${created.length} permissions upserted`);
+  console.log(`  ${created.length} permissions upserted`);
 
-  // Upsert roles and wire up their permissions
+  const roleMap = new Map<string, string>();
   for (const [roleName, permKeys] of Object.entries(ROLE_PERMISSIONS)) {
     const role = await prisma.role.upsert({
       where: { name: roleName },
       update: {},
       create: { name: roleName },
     });
+    roleMap.set(roleName, role.id);
 
     await Promise.all(
-      permKeys.map((key) => {
-        const permId = permMap.get(key);
-        if (!permId) return Promise.resolve();
-        return prisma.rolePermission.upsert({
-          where: { roleId_permissionId: { roleId: role.id, permissionId: permId } },
-          update: {},
-          create: { roleId: role.id, permissionId: permId },
-        });
-      }),
+      permKeys
+        .filter((key) => permMap.has(key))
+        .map((key) => {
+          const permId = permMap.get(key)!;
+          return prisma.rolePermission.upsert({
+            where: { roleId_permissionId: { roleId: role.id, permissionId: permId } },
+            update: {},
+            create: { roleId: role.id, permissionId: permId },
+          });
+        }),
     );
 
-    console.log(`  ✓ '${roleName}' role — ${permKeys.length} permissions assigned`);
+    console.log(`  '${roleName}' role - ${permKeys.length} permissions assigned`);
   }
 
+  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL?.toLowerCase();
+  const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
+  const superAdminFirstName = process.env.SUPER_ADMIN_FIRST_NAME;
+  const superAdminLastName = process.env.SUPER_ADMIN_LAST_NAME;
+  const superAdminPhone = process.env.SUPER_ADMIN_PHONE || undefined;
+
+  if (!superAdminEmail || !superAdminPassword || !superAdminFirstName || !superAdminLastName) {
+    throw new Error(
+      'SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD, SUPER_ADMIN_FIRST_NAME, and SUPER_ADMIN_LAST_NAME are required in environment to seed super admin',
+    );
+  }
+
+  const hashedPassword = await bcrypt.hash(superAdminPassword, 12);
+  const superAdmin = await prisma.user.upsert({
+    where: { email: superAdminEmail },
+    update: {
+      firstName: superAdminFirstName,
+      lastName: superAdminLastName,
+      phone: superAdminPhone,
+      isActive: true,
+      isVerified: true,
+      isEmailVerified: true,
+      isPhoneVerified: false,
+    },
+    create: {
+      firstName: superAdminFirstName,
+      lastName: superAdminLastName,
+      email: superAdminEmail,
+      phone: superAdminPhone,
+      password: hashedPassword,
+      isActive: true,
+      isVerified: true,
+      isEmailVerified: true,
+      isPhoneVerified: false,
+    },
+  });
+
+  const superAdminRoleId = roleMap.get('super_admin');
+  if (!superAdminRoleId) {
+    throw new Error('super_admin role not found after seeding roles');
+  }
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: superAdmin.id,
+        roleId: superAdminRoleId,
+      },
+    },
+    update: {},
+    create: {
+      userId: superAdmin.id,
+      roleId: superAdminRoleId,
+      assignedBy: superAdmin.id,
+    },
+  });
+
+  console.log(`  super_admin user seeded (${superAdminEmail}) and role assigned`);
   console.log('\nSeeding complete.');
 }
 
-main()
-  .catch((err) => {
+void (async () => {
+  try {
+    await main();
+  } catch (err) {
     console.error(err);
     process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+  } finally {
+    await prisma.$disconnect();
+  }
+})();
