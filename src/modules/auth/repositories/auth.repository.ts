@@ -503,3 +503,61 @@ export async function revokeRefreshToken(rawToken: string): Promise<void> {
 export async function revokeAllRefreshTokens(userId: string): Promise<void> {
   await prisma.refreshToken.deleteMany({ where: { userId } });
 }
+
+// ---------------------------------------------------------------------------
+// Password reset token storage
+// ---------------------------------------------------------------------------
+
+const PASSWORD_RESET_TOKEN_EXPIRY_MINUTES = 15;
+
+/**
+ * Creates a hashed password reset token for the user and stores it in DB.
+ * Returns the raw (unhashed) token to be sent to the client.
+ */
+export async function storePasswordResetToken(
+  userId: string,
+  context?: { ipAddress?: string; userAgent?: string },
+): Promise<string> {
+  const { randomBytes } = await import('crypto');
+  const rawToken = randomBytes(32).toString('hex');
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_EXPIRY_MINUTES * 60 * 1000);
+
+  // Revoke any existing unused tokens for this user first
+  await prisma.passwordResetToken.updateMany({
+    where: { userId, usedAt: null, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+
+  await prisma.passwordResetToken.create({
+    data: {
+      userId,
+      token: tokenHash,
+      expiresAt,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+    },
+  });
+
+  return rawToken;
+}
+
+/**
+ * Validates a raw reset token by comparing its hash, then marks it as used.
+ * Returns the userId if valid, null otherwise.
+ */
+export async function consumePasswordResetToken(rawToken: string): Promise<string | null> {
+  const tokenHash = hashToken(rawToken);
+
+  return prisma.$transaction(async (tx) => {
+    const record = await tx.passwordResetToken.findUnique({ where: { token: tokenHash } });
+    if (!record || record.usedAt || record.revokedAt || record.expiresAt < new Date()) {
+      return null;
+    }
+    await tx.passwordResetToken.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
+    });
+    return record.userId;
+  });
+}

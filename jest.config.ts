@@ -19,4 +19,4 @@ const config: Config = {
   clearMocks: true,
 };
 
-export default config;
+export = config;

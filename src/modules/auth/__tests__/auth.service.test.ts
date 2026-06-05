@@ -291,16 +291,15 @@ describe('authService.verifyRegistrationOtp', () => {
 // resetPassword
 // ---------------------------------------------------------------------------
 describe('authService.resetPassword', () => {
-  it('resets password and revokes all sessions when OTP is valid', async () => {
-    mockRepo.consumeOtpCode.mockResolvedValueOnce(true);
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+  it('resets password and revokes all sessions when reset token is valid', async () => {
+    mockRepo.consumePasswordResetToken.mockResolvedValueOnce('user-1' as never);
+    mockRepo.findUserById.mockResolvedValueOnce(sampleUser as never);
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('new_hashed_pw');
     mockRepo.updateUserPassword.mockResolvedValueOnce(undefined as never);
     mockRepo.revokeAllRefreshTokens.mockResolvedValueOnce(undefined as never);
 
     await authService.resetPassword({
-      email: 'alice@example.com',
-      otpCode: '123456',
+      resetToken: 'valid-reset-token',
       newPassword: 'NewPassword1',
     });
 
@@ -308,26 +307,24 @@ describe('authService.resetPassword', () => {
     expect(mockRepo.revokeAllRefreshTokens).toHaveBeenCalledWith('user-1');
   });
 
-  it('throws 401 when reset OTP is invalid', async () => {
-    mockRepo.consumeOtpCode.mockResolvedValueOnce(false);
+  it('throws 401 when reset token is invalid or expired', async () => {
+    mockRepo.consumePasswordResetToken.mockResolvedValueOnce(null as never);
 
     await expect(
       authService.resetPassword({
-        email: 'alice@example.com',
-        otpCode: '123456',
+        resetToken: 'invalid-token',
         newPassword: 'NewPassword1',
       }),
-    ).rejects.toThrow(new AppError('Invalid or expired OTP code', 401));
+    ).rejects.toThrow(new AppError('Invalid or expired password reset token', 401));
   });
 
-  it('throws 404 when account is not found after OTP check', async () => {
-    mockRepo.consumeOtpCode.mockResolvedValueOnce(true);
-    mockRepo.findUserByPhone.mockResolvedValueOnce(null);
+  it('throws 404 when account is not found after token check', async () => {
+    mockRepo.consumePasswordResetToken.mockResolvedValueOnce('user-1' as never);
+    mockRepo.findUserById.mockResolvedValueOnce(null as never);
 
     await expect(
       authService.resetPassword({
-        phone: '+2348012345678',
-        otpCode: '123456',
+        resetToken: 'valid-reset-token',
         newPassword: 'NewPassword1',
       }),
     ).rejects.toThrow(new AppError('Account not found', 404));

@@ -24,10 +24,11 @@ export interface VerifyOtpInput {
   otpCode: string;
 }
 export interface VerifyRegistrationOtpInput extends VerifyOtpInput { }
+export interface VerifyPasswordResetOtpResult {
+  resetToken: string;
+}
 export interface ResetPasswordInput {
-  email?: string;
-  phone?: string;
-  otpCode: string;
+  resetToken: string;
   newPassword: string;
 }
 export interface RefreshInput {

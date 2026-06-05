@@ -10,6 +10,7 @@ import {
   ResetPasswordInput,
   VerifyRegistrationOtpInput,
 } from '../auth.types';
+import { ResendOtpInput } from '../auth.types';
 import { sendCreated, sendSuccess } from '@/common/helpers/response';
 
 function getRequestContext(req: Request): RequestContext {
@@ -32,8 +33,6 @@ export async function forgotPasswordHandler(req: Request, res: Response): Promis
   sendSuccess(res, result, 'Password reset OTP generated');
 }
 
-export const requestPasswordResetOtpHandler = forgotPasswordHandler;
-
 export async function registerHandler(req: Request, res: Response): Promise<void> {
   const result = await authService.register(req.body as RegisterInput, getRequestContext(req));
   sendCreated(res, result, 'Registration successful');
@@ -44,41 +43,17 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
   sendSuccess(res, result, 'Login successful');
 }
 
-/**
- * 
- * Handles OTP verification for both registration and password reset flows. For registration, it returns the auth result upon successful OTP verification. For password reset, it performs the password reset immediately upon successful OTP verification.
- * @param req 
- * @param res 
- * @returns 
- */
 export async function verifyOtpHandler(req: Request, res: Response): Promise<void> {
-  const payload = req.body as VerifyOtpInput;
+  const body = req.body as VerifyOtpInput & { purpose: 'REGISTRATION' | 'PASSWORD_RESET' };
   const context = getRequestContext(req);
 
-  // For password reset OTP verification, we perform the password reset immediately upon successful OTP verification.
-  if (payload.purpose === 'PASSWORD_RESET') {
-    await authService.resetPassword(
-      {
-        email: payload.email,
-        phone: payload.phone,
-        otpCode: payload.otpCode,
-        newPassword: payload.newPassword,
-      },
-      context,
-    );
-    sendSuccess(res, null, 'Password reset successful');
+  if (body.purpose === 'PASSWORD_RESET') {
+    const result = await authService.verifyPasswordResetOtp(body, context);
+    sendSuccess(res, result, 'OTP verified. Use the reset token to set a new password.');
     return;
   }
 
-  // For registration OTP verification, we can return the auth result immediately upon successful OTP verification.
-  const result = await authService.verifyRegistrationOtp(
-    {
-      email: payload.email,
-      phone: payload.phone,
-      otpCode: payload.otpCode,
-    } as VerifyRegistrationOtpInput,
-    context,
-  );
+  const result = await authService.verifyRegistrationOtp(body as VerifyRegistrationOtpInput, context);
   sendSuccess(res, result, 'Registration OTP verified');
 }
 

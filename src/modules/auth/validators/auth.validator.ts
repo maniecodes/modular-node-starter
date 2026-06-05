@@ -17,28 +17,11 @@ const emailOrPhoneSchema = z
   });
 
 export const forgotPasswordSchema = emailOrPhoneSchema;
-export const verifyOtpSchema = emailOrPhoneSchema
-  .extend({
-    purpose: z.enum(['REGISTRATION', 'PASSWORD_RESET']),
-    otpCode: z.string().regex(/^\d{6}$/, 'OTP code must be 6 digits'),
-    newPassword: z.string().optional(),
-  })
-  .refine((v) => (v.purpose === 'PASSWORD_RESET' ? Boolean(v.newPassword) : true), {
-    message: 'newPassword is required for PASSWORD_RESET',
-    path: ['newPassword'],
-  })
-  .refine(
-    (v) =>
-      v.purpose === 'REGISTRATION' ||
-      (!!v.newPassword?.match(/[A-Z]/) &&
-        !!v.newPassword?.match(/[0-9]/) &&
-        v.newPassword.length >= 8),
-    {
-      message:
-        'For PASSWORD_RESET, newPassword must be at least 8 chars and include one uppercase and one number',
-      path: ['newPassword'],
-    },
-  );
+
+export const verifyOtpSchema = emailOrPhoneSchema.extend({
+  purpose: z.enum(['REGISTRATION', 'PASSWORD_RESET']),
+  otpCode: z.string().regex(/^\d{6}$/, 'OTP code must be 6 digits'),
+});
 
 export const registerSchema = emailOrPhoneSchema.extend({
   firstName: z.string().min(2).max(100),
@@ -55,8 +38,8 @@ export const loginSchema = emailOrPhoneSchema.extend({
   password: z.string().min(1),
 });
 
-export const resetPasswordSchema = emailOrPhoneSchema.extend({
-  otpCode: z.string().regex(/^\d{6}$/, 'OTP code must be 6 digits'),
+export const resetPasswordSchema = z.object({
+  resetToken: z.string().min(1, 'Reset token is required'),
   newPassword: z
     .string()
     .min(8)

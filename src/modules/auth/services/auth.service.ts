@@ -20,6 +20,7 @@ import {
   VerifyOtpInput,
   VerifyRegistrationOtpInput,
 } from '../auth.types';
+import { VerifyPasswordResetOtpResult } from '../auth.types';
 import { sendSuccess } from '@/common/helpers/response';
 
 type SelectedRole = {
@@ -129,6 +130,24 @@ async function generateRegistrationOtpPayload(
   const expiresAt = new Date(Date.now() + env.OTP_EXPIRES_MINUTES * 60 * 1000);
 
   return { otpCode, encryptedCode, expiresAt };
+}
+
+async function consumeAndValidateOtp(
+  input: VerifyOtpInput,
+  purpose: OtpPurpose,
+  context?: RequestContext,
+) {
+  const { type, target } = resolveIdentifier(input);
+  const otpValid = await authRepository.consumeOtpCode(target, type, purpose, input.otpCode, context);
+  if (!otpValid) throw new AppError('Invalid or expired OTP code', 401);
+
+  const user =
+    type === OtpType.EMAIL
+      ? await authRepository.findUserByEmail(target)
+      : await authRepository.findUserByPhone(target);
+  if (!user) throw new AppError('Account not found', 404);
+
+  return { user, type };
 }
 
 export async function register(
@@ -298,45 +317,25 @@ export async function forgotPassword(
   return generateAndStoreOtp(target, type, OtpPurpose.PASSWORD_RESET, context);
 }
 
-export async function verifyOtp(
-  input: VerifyOtpInput,
-  purpose: OtpPurpose,
+export async function verifyRegistrationOtp(
+  input: VerifyRegistrationOtpInput,
   context?: RequestContext,
 ): Promise<AuthResult> {
-  const { type, target } = resolveIdentifier(input);
-  const otpValid = await authRepository.consumeOtpCode(
-    target,
-    type,
-    purpose,
-    input.otpCode,
-    context,
-  );
-
-  if (!otpValid) throw new AppError('Invalid or expired OTP code', 401);
-
-  const user =
-    type === OtpType.EMAIL
-      ? await authRepository.findUserByEmail(target)
-      : await authRepository.findUserByPhone(target);
-
-  if (!user) {
-    throw new AppError('Account not found', 404);
-  }
+  const { user, type } = await consumeAndValidateOtp(input, OtpPurpose.REGISTRATION, context);
 
   if (!user.isVerified) {
     await authRepository.markUserAsVerified(user.id, type);
     user.isVerified = true;
-    if (type === OtpType.EMAIL) {
-      user.isEmailVerified = true;
-    } else {
-      user.isPhoneVerified = true;
-    }
+
+    if (type === OtpType.EMAIL) user.isEmailVerified = true;
+    else user.isPhoneVerified = true;
   }
 
   const roles = await authRepository.findUserRoleNames(user.id);
   const permissions = await authRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roles, permissions);
   const { token: refreshToken } = await issueRefreshToken(user.id);
+
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email ?? undefined,
@@ -354,32 +353,33 @@ export async function verifyOtp(
   return { user: safeUser, tokens: { accessToken, refreshToken } };
 }
 
-export async function verifyRegistrationOtp(
-  input: VerifyRegistrationOtpInput,
+export async function verifyPasswordResetOtp(
+  input: VerifyOtpInput,
   context?: RequestContext,
-): Promise<AuthResult> {
-  return verifyOtp(input, OtpPurpose.REGISTRATION, context);
+): Promise<VerifyPasswordResetOtpResult> {
+  const { user } = await consumeAndValidateOtp(input, OtpPurpose.PASSWORD_RESET, context);
+
+  const resetToken = await authRepository.storePasswordResetToken(user.id, context);
+
+  securityEvent('otp_verification_success', {
+    userId: user.id,
+    email: user.email,
+    phone: user.phone,
+    ipAddress: context?.ipAddress,
+    userAgent: context?.userAgent,
+  });
+
+  return { resetToken };
 }
 
 export async function resetPassword(
   input: ResetPasswordInput,
   context?: RequestContext,
 ): Promise<void> {
-  const { type, target } = resolveIdentifier(input);
+  const userId = await authRepository.consumePasswordResetToken(input.resetToken);
+  if (!userId) throw new AppError('Invalid or expired password reset token', 401);
 
-  const otpValid = await authRepository.consumeOtpCode(
-    target,
-    type,
-    OtpPurpose.PASSWORD_RESET,
-    input.otpCode,
-    context,
-  );
-  if (!otpValid) throw new AppError('Invalid or expired OTP code', 401);
-
-  const user =
-    type === OtpType.EMAIL
-      ? await authRepository.findUserByEmail(target)
-      : await authRepository.findUserByPhone(target);
+  const user = await authRepository.findUserById(userId);
   if (!user) throw new AppError('Account not found', 404);
 
   const hashedPassword = await bcrypt.hash(input.newPassword, env.BCRYPT_ROUNDS);
@@ -393,6 +393,27 @@ export async function resetPassword(
     ipAddress: context?.ipAddress,
     userAgent: context?.userAgent,
   });
+}
+
+export async function resendOtp(
+  input: ResendOtpInput,
+  context?: RequestContext,
+): Promise<{ channel: 'email' | 'phone'; otpCode: string }> {
+  const { type, target } = resolveIdentifier(input);
+  const otpCode = generateOtpCode();
+  const encryptedCode = await bcrypt.hash(otpCode, env.BCRYPT_ROUNDS);
+  const expiresAt = new Date(Date.now() + env.OTP_EXPIRES_MINUTES * 60 * 1000);
+
+  const purpose = await authRepository.resendOtpCode(
+    target,
+    type,
+    encryptedCode,
+    expiresAt,
+    input.purpose as OtpPurpose | undefined,
+    context,
+  );
+
+  return { channel: type === OtpType.EMAIL ? 'email' : 'phone', otpCode };
 }
 
 export async function refreshTokens(rawToken: string): Promise<TokenPair> {
@@ -423,26 +444,6 @@ export async function refreshTokens(rawToken: string): Promise<TokenPair> {
   securityEvent('refresh_success', { userId: user.id });
 
   return { accessToken, refreshToken: newRefreshToken };
-}
-
-export async function resendOtp(
-  input: ResendOtpInput,
-  context?: RequestContext,
-): Promise<{ channel: 'email' | 'phone'; otpCode: string }> {
-  const { type, target } = resolveIdentifier(input);
-  const otpCode = generateOtpCode();
-  const encryptedCode = await bcrypt.hash(otpCode, env.BCRYPT_ROUNDS);
-  const expiresAt = new Date(Date.now() + env.OTP_EXPIRES_MINUTES * 60 * 1000);
-  const purpose = await authRepository.resendOtpCode(
-    target,
-    type,
-    encryptedCode,
-    expiresAt,
-    input.purpose as OtpPurpose | undefined,
-    context,
-  );
-
-  return { channel: type === OtpType.EMAIL ? 'email' : 'phone', otpCode };
 }
 
 export async function logout(rawToken: string): Promise<void> {

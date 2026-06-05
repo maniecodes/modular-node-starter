@@ -33,6 +33,7 @@ model User {
 
     roles         UserRole[]
     refreshTokens RefreshToken[]
+    resetTokens  PasswordResetToken[]
 
     @@map("users")
 }
@@ -138,4 +139,24 @@ model OtpCode {
 
     @@index([target, type, purpose])
     @@map("otp_codes")
+}
+
+model PasswordResetToken {
+  id          String   @id @default(cuid())
+  userId      String
+  token       String   @unique
+
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+
+  usedAt      DateTime?
+  revokedAt   DateTime?
+
+  ipAddress   String?
+  userAgent   String?
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, token])
+  @@map("password_reset_tokens")
 }

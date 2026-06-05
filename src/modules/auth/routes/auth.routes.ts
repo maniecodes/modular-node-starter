@@ -7,6 +7,7 @@ import {
   refreshSchema,
   registerSchema,
   resendOtpSchema,
+  resetPasswordSchema,
   verifyOtpSchema,
 } from '../validators/auth.validator';
 import {
@@ -16,6 +17,7 @@ import {
   refreshHandler,
   registerHandler,
   resendOtpHandler,
+  resetPasswordHandler,
   verifyOtpHandler,
 } from '../controllers/auth.controller';
 
@@ -28,6 +30,7 @@ router.post('/forgot-password', validate(forgotPasswordSchema), forgotPasswordHa
 router.post('/refresh', validate(refreshSchema), refreshHandler);
 router.post('/register', validate(registerSchema), registerHandler);
 router.post('/resend-otp', validate(resendOtpSchema), resendOtpHandler);
+router.post('/reset-password', validate(resetPasswordSchema), resetPasswordHandler);
 router.post('/verify-otp', validate(verifyOtpSchema), verifyOtpHandler);
 
 export default router;
