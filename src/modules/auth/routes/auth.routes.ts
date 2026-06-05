@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { validate } from '@/core/validation/validate.middleware';
+import { requireAuth } from '@/core/auth/middleware';
 import {
   forgotPasswordSchema,
   loginSchema,
@@ -14,6 +15,7 @@ import {
   loginHandler,
   logoutHandler,
   forgotPasswordHandler,
+  getCurrentUserHandler,
   refreshHandler,
   registerHandler,
   resendOtpHandler,
@@ -25,8 +27,9 @@ const router = Router();
 
 
 router.post('/login', validate(loginSchema), loginHandler);
-router.post('/logout', validate(logoutSchema), logoutHandler);
+router.post('/logout', requireAuth, validate(logoutSchema), logoutHandler);
 router.post('/forgot-password', validate(forgotPasswordSchema), forgotPasswordHandler);
+router.get('/me', requireAuth, getCurrentUserHandler);
 router.post('/refresh', validate(refreshSchema), refreshHandler);
 router.post('/register', validate(registerSchema), registerHandler);
 router.post('/resend-otp', validate(resendOtpSchema), resendOtpHandler);

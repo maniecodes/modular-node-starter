@@ -1,11 +1,11 @@
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/core/errors/AppError';
 import { verifyAccessToken } from './jwt';
 import { AuthenticatedRequest } from '@/common/types';
 import { loadUserContext } from './user-context';
 
 export async function requireAuth(
-  req: AuthenticatedRequest,
+  req: Request,
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
@@ -28,7 +28,7 @@ export async function requireAuth(
   if (!context) throw new AppError('User not found', 401);
   if (!context.isActive) throw new AppError('Account is deactivated', 403);
 
-  req.user = {
+  (req as AuthenticatedRequest).user = {
     id: context.id,
     email: context.email ?? undefined,
     phone: context.phone ?? undefined,

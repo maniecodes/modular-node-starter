@@ -9,8 +9,10 @@ import {
   VerifyOtpInput,
   ResetPasswordInput,
   VerifyRegistrationOtpInput,
+  ResendOtpInput,
 } from '../auth.types';
-import { ResendOtpInput } from '../auth.types';
+import { AuthenticatedRequest } from '@/common/types';
+import { AppError } from '@/core/errors/AppError';
 import { sendCreated, sendSuccess } from '@/common/helpers/response';
 
 function getRequestContext(req: Request): RequestContext {
@@ -71,6 +73,12 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
 export async function resendOtpHandler(req: Request, res: Response): Promise<void> {
   const result = await authService.resendOtp(req.body as RequestOtpInput, getRequestContext(req));
   sendSuccess(res, result, 'OTP resent successfully');
+}
+
+export async function getCurrentUserHandler(req: Request, res: Response): Promise<void> {
+  const user = (req as AuthenticatedRequest).user;
+  if (!user) throw new AppError('Unauthenticated', 401);
+  sendSuccess(res, user, 'Current user retrieved successfully');
 }
 
 export async function logoutHandler(req: Request, res: Response): Promise<void> {
