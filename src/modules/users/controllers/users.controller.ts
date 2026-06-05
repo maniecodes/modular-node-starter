@@ -8,7 +8,7 @@ import { UpdateUserInput } from '../users.types';
 export async function getProfileHandler(req: AuthenticatedRequest, res: Response): Promise<void> {
   if (!req.user) throw new AppError('Unauthenticated', 401);
   const user = await usersService.getProfile(req.user.id);
-  sendSuccess(res, user);
+  sendSuccess(res, user, 'Current user retrieved successfully');
 }
 
 export async function updateProfileHandler(

@@ -75,12 +75,6 @@ export async function resendOtpHandler(req: Request, res: Response): Promise<voi
   sendSuccess(res, result, 'OTP resent successfully');
 }
 
-export async function getCurrentUserHandler(req: Request, res: Response): Promise<void> {
-  const user = (req as AuthenticatedRequest).user;
-  if (!user) throw new AppError('Unauthenticated', 401);
-  sendSuccess(res, user, 'Current user retrieved successfully');
-}
-
 export async function logoutHandler(req: Request, res: Response): Promise<void> {
   const { refreshToken } = req.body as RefreshInput;
   await authService.logout(refreshToken);
