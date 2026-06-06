@@ -27,6 +27,31 @@ export interface VerifyRegistrationOtpInput extends VerifyOtpInput { }
 export interface VerifyPasswordResetOtpResult {
   resetToken: string;
 }
+
+export type InviteChannel = 'email' | 'whatsapp';
+
+export interface InviteUserInput {
+  email: string;
+  phone?: string;
+  roles: string[];
+  channel?: InviteChannel;
+}
+
+export interface AcceptInviteInput {
+  token: string;
+  firstName: string;
+  lastName: string;
+  password: string;
+}
+
+export interface InviteUserResult {
+  inviteId: string;
+  email: string;
+  phone?: string;
+  channel: InviteChannel;
+  expiresAt: Date;
+}
+
 export interface ResetPasswordInput {
   resetToken: string;
   newPassword: string;

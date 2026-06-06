@@ -1,17 +1,12 @@
-import { createHash } from 'crypto';
+// import { createHash } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { AppError } from '@/core/errors/AppError';
 import { env } from '@/core/config/env';
-import { prisma } from '@/core/database/prisma';
 import { OtpPurpose, OtpType, Prisma } from '@prisma/client';
+import { OTP_EXPIRY_SKEW_MS, OTP_RESEND_COOLDOWN_MS, MAX_OTP_REQUESTS_PER_WINDOW } from '@/common/constants';
+import { generateInviteToken, hashToken } from '@/common/crypto/token';
+import { prisma } from '@/core/database/prisma';
 
-const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
-const OTP_EXPIRY_SKEW_MS = 5 * 1000;
-const MAX_OTP_REQUESTS_PER_WINDOW = 3;
-
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
-}
 
 async function lockOtpScope(
   tx: Prisma.TransactionClient,
@@ -559,5 +554,138 @@ export async function consumePasswordResetToken(rawToken: string): Promise<strin
       data: { usedAt: new Date() },
     });
     return record.userId;
+  });
+}
+
+const USER_INVITE_EXPIRES_HOURS = 48;
+
+type CreateUserInviteParams = {
+  email: string;
+  createdBy: string;
+  roleIds: string[];
+};
+
+export async function createUserInvite(params: CreateUserInviteParams): Promise<{
+  inviteId: string;
+  rawToken: string;
+  expiresAt: Date;
+}> {
+  const rawToken = generateInviteToken();
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + USER_INVITE_EXPIRES_HOURS * 60 * 60 * 1000);
+
+  const invite = await prisma.$transaction(async (tx) => {
+    // Invalidate any previously active invite for this email to prevent parallel valid invites.
+    await tx.userInvite.updateMany({
+      where: {
+        email: params.email,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { usedAt: new Date() },
+    });
+
+    return tx.userInvite.create({
+      data: {
+        email: params.email,
+        tokenHash,
+        expiresAt,
+        createdBy: params.createdBy,
+        userInviteRoles: {
+          createMany: {
+            data: params.roleIds.map((roleId) => ({ roleId })),
+          },
+        },
+      },
+      select: { id: true },
+    });
+  });
+
+  return { inviteId: invite.id, rawToken, expiresAt };
+}
+
+export async function consumeUserInvite(rawToken: string): Promise<{
+  id: string;
+  email: string;
+  createdBy: string;
+  roleIds: string[];
+} | null> {
+  const tokenHash = hashToken(rawToken);
+
+  return prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const invite = await tx.userInvite.findUnique({
+      where: { tokenHash },
+      include: {
+        userInviteRoles: {
+          select: { roleId: true },
+        },
+      },
+    });
+
+    if (!invite || invite.usedAt || invite.expiresAt <= now) return null;
+
+    const marked = await tx.userInvite.updateMany({
+      where: {
+        id: invite.id,
+        usedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { usedAt: now },
+    });
+
+    if (marked.count !== 1) return null;
+
+    return {
+      id: invite.id,
+      email: invite.email,
+      createdBy: invite.createdBy,
+      roleIds: invite.userInviteRoles.map((r: { roleId: string }) => r.roleId),
+    };
+  });
+}
+
+export async function createInvitedUserWithRoles(input: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  roleIds: string[];
+  assignedBy?: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        firstName: input.firstName,
+        lastName: input.lastName,
+        email: input.email,
+        password: input.password,
+        isVerified: true,
+        isEmailVerified: true,
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        isEmailVerified: true,
+        isPhoneVerified: true,
+      },
+    });
+
+    await Promise.all(
+      input.roleIds.map((roleId) =>
+        tx.userRole.create({
+          data: {
+            userId: user.id,
+            roleId,
+            assignedBy: input.assignedBy,
+          },
+        }),
+      ),
+    );
+
+    return user;
   });
 }

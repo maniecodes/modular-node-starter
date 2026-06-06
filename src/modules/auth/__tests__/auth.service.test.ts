@@ -4,6 +4,8 @@ import * as authService from '../services/auth.service';
 import * as authRepository from '../repositories/auth.repository';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '@/core/auth/jwt';
 import * as loginProtection from '@/core/auth/login-protection';
+import * as mailService from '@/core/mail/mail.service';
+import { logger } from '@/common/utils/logger';
 
 // Mock at the repository boundary — service tests must not know Prisma internals
 jest.mock('../repositories/auth.repository');
@@ -12,6 +14,15 @@ jest.mock('@/core/auth/jwt');
 jest.mock('bcryptjs');
 // Mock login protection so tests run without in-memory state leaking
 jest.mock('@/core/auth/login-protection');
+jest.mock('@/core/mail/mail.service');
+jest.mock('@/common/utils/logger', () => ({
+  logger: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  },
+}));
 
 const mockRepo = authRepository as jest.Mocked<typeof authRepository>;
 const mockSignAccess = signAccessToken as jest.MockedFunction<typeof signAccessToken>;
@@ -19,6 +30,8 @@ const mockSignRefresh = signRefreshToken as jest.MockedFunction<typeof signRefre
 const mockVerifyRefresh = verifyRefreshToken as jest.MockedFunction<typeof verifyRefreshToken>;
 const mockBcrypt = bcrypt as jest.Mocked<typeof bcrypt>;
 const mockLoginProtection = loginProtection as jest.Mocked<typeof loginProtection>;
+const mockMailService = mailService as jest.Mocked<typeof mailService>;
+const mockLogger = logger as jest.Mocked<typeof logger>;
 
 const sampleUser = {
   id: 'user-1',
@@ -284,6 +297,134 @@ describe('authService.verifyRegistrationOtp', () => {
         otpCode: '123456',
       }),
     ).rejects.toThrow(new AppError('Invalid or expired OTP code', 401));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inviteStaff
+// ---------------------------------------------------------------------------
+describe('authService.inviteStaff', () => {
+  it('creates invite and sends an email invitation', async () => {
+    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockRepo.findRolesByNames.mockResolvedValueOnce([
+      { id: 'role-1', name: 'staff' },
+    ] as never);
+    mockRepo.findUserById.mockResolvedValueOnce(sampleUser as never);
+    mockRepo.createStaffInvite.mockResolvedValueOnce({
+      inviteId: 'invite-1',
+      rawToken: 'raw-token',
+      expiresAt: new Date(Date.now() + 60_000),
+    } as never);
+    mockMailService.sendEmail.mockResolvedValueOnce(undefined as never);
+
+    const result = await authService.inviteStaff(
+      {
+        email: 'new.staff@example.com',
+        roles: ['staff'],
+        channel: 'email',
+      },
+      'user-1',
+    );
+
+    expect(mockRepo.createStaffInvite).toHaveBeenCalledWith({
+      email: 'new.staff@example.com',
+      createdBy: 'user-1',
+      roleIds: ['role-1'],
+    });
+    expect(mockMailService.sendEmail).toHaveBeenCalled();
+    expect(result.inviteId).toBe('invite-1');
+    expect(result.channel).toBe('email');
+  });
+
+  it('logs a WhatsApp dispatch payload for whatsapp channel', async () => {
+    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockRepo.findRolesByNames.mockResolvedValueOnce([
+      { id: 'role-1', name: 'staff' },
+    ] as never);
+    mockRepo.findUserById.mockResolvedValueOnce(sampleUser as never);
+    mockRepo.createStaffInvite.mockResolvedValueOnce({
+      inviteId: 'invite-2',
+      rawToken: 'raw-token-2',
+      expiresAt: new Date(Date.now() + 60_000),
+    } as never);
+
+    const result = await authService.inviteStaff(
+      {
+        email: 'new.staff@example.com',
+        phone: '+2348012345678',
+        roles: ['staff'],
+        channel: 'whatsapp',
+      },
+      'user-1',
+    );
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'staff_invite_whatsapp_dispatch',
+      expect.objectContaining({ phone: '+2348012345678' }),
+    );
+    expect(result.channel).toBe('whatsapp');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// acceptInvite
+// ---------------------------------------------------------------------------
+describe('authService.acceptInvite', () => {
+  it('accepts invite, creates user with roles, and returns auth tokens', async () => {
+    mockRepo.consumeUserInvite.mockResolvedValueOnce({
+      id: 'invite-1',
+      email: 'invited@example.com',
+      createdBy: 'user-1',
+      roleIds: ['role-1'],
+    } as never);
+    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
+    (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('hashed_pw');
+    mockRepo.createInvitedUserWithRoles.mockResolvedValueOnce({
+      id: 'user-2',
+      firstName: 'New',
+      lastName: 'Staff',
+      email: 'invited@example.com',
+      phone: null,
+      isEmailVerified: true,
+      isPhoneVerified: false,
+    } as never);
+    mockRepo.findUserRoleNames.mockResolvedValueOnce(['staff']);
+    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
+    mockSignRefresh.mockReturnValueOnce('refresh-token');
+    mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-2', exp: futureExp });
+    mockRepo.storeRefreshToken.mockResolvedValueOnce(undefined as never);
+    mockSignAccess.mockReturnValueOnce('access-token');
+
+    const result = await authService.acceptInvite({
+      token: 'raw-token',
+      firstName: 'New',
+      lastName: 'Staff',
+      password: 'Password1',
+    });
+
+    expect(mockRepo.createInvitedUserWithRoles).toHaveBeenCalledWith({
+      firstName: 'New',
+      lastName: 'Staff',
+      email: 'invited@example.com',
+      password: 'hashed_pw',
+      roleIds: ['role-1'],
+      assignedBy: 'user-1',
+    });
+    expect(result.tokens.accessToken).toBe('access-token');
+    expect(result.tokens.refreshToken).toBe('refresh-token');
+  });
+
+  it('throws 401 when invite token is invalid or already used', async () => {
+    mockRepo.consumeUserInvite.mockResolvedValueOnce(null as never);
+
+    await expect(
+      authService.acceptInvite({
+        token: 'invalid-token',
+        firstName: 'New',
+        lastName: 'Staff',
+        password: 'Password1',
+      }),
+    ).rejects.toThrow(new AppError('Invalid, expired, or already used invite token', 401));
   });
 });
 

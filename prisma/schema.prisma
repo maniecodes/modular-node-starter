@@ -33,7 +33,7 @@ model User {
 
     roles         UserRole[]
     refreshTokens RefreshToken[]
-    resetTokens  PasswordResetToken[]
+    resetTokens   PasswordResetToken[]
 
     @@map("users")
 }
@@ -45,8 +45,9 @@ model Role {
     createdAt   DateTime @default(now())
     updatedAt   DateTime @updatedAt
 
-    users       UserRole[]
-    permissions RolePermission[]
+    users           UserRole[]
+    permissions     RolePermission[]
+    userInviteRoles UserInviteRole[]
 
     @@map("roles")
 }
@@ -70,8 +71,10 @@ model UserRole {
     assignedAt DateTime @default(now())
     assignedBy String?
 
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-    role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+    user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+    role         Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+    userInvite   UserInvite? @relation(fields: [userInviteId], references: [id])
+    userInviteId String?
 
     @@id([userId, roleId])
     @@map("user_roles")
@@ -82,8 +85,10 @@ model RolePermission {
     permissionId String
     assignedAt   DateTime @default(now())
 
-    role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-    permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+    role         Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+    permission   Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+    userInvite   UserInvite? @relation(fields: [userInviteId], references: [id])
+    userInviteId String?
 
     @@id([roleId, permissionId])
     @@map("role_permissions")
@@ -142,21 +147,52 @@ model OtpCode {
 }
 
 model PasswordResetToken {
-  id          String   @id @default(cuid())
-  userId      String
-  token       String   @unique
+    id     String @id @default(cuid())
+    userId String
+    token  String @unique
 
-  createdAt   DateTime @default(now())
-  expiresAt   DateTime
+    createdAt DateTime @default(now())
+    expiresAt DateTime
 
-  usedAt      DateTime?
-  revokedAt   DateTime?
+    usedAt    DateTime?
+    revokedAt DateTime?
 
-  ipAddress   String?
-  userAgent   String?
+    ipAddress String?
+    userAgent String?
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, token])
-  @@map("password_reset_tokens")
+    @@index([userId, token])
+    @@map("password_reset_tokens")
+}
+
+model UserInvite {
+    id    String @id @default(cuid())
+    email String
+
+    tokenHash String @unique
+
+    expiresAt DateTime
+    usedAt    DateTime?
+
+    createdBy String
+
+    createdAt DateTime @default(now())
+
+    users           UserRole[]
+    userInviteRoles UserInviteRole[]
+    rolePermissions RolePermission[]
+
+    @@index([email])
+}
+
+model UserInviteRole {
+    inviteId String
+    roleId   String
+
+    invite UserInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+    role   Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+    @@id([inviteId, roleId])
+    @@map("user_invite_roles")
 }

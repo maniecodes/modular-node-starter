@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
-import { requireAuth } from '@/core/auth/middleware';
-import { authorize } from '@/core/rbac/middleware';
-import { validate } from '@/core/validation/validate.middleware';
+import { requireAuth } from '@/core/middleware/auth.middleware';
+import { authorize } from '@/modules/access-control/middleware';
+import { validate } from '@/core/middleware/validate.middleware';
 import {
   createRoleSchema,
   createPermissionSchema,
@@ -36,9 +36,9 @@ type AuthHandler = (
 
 const wrap =
   (fn: AuthHandler) =>
-  (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-    fn(req, res, next).catch(next);
-  };
+    (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+      fn(req, res, next).catch(next);
+    };
 
 // Roles router
 // Mounted at /api/v1/roles

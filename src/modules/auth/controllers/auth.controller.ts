@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
 import {
+  AcceptInviteInput,
+  InviteUserInput,
   LoginInput,
   RefreshInput,
   RegisterInput,
@@ -73,6 +75,29 @@ export async function refreshHandler(req: Request, res: Response): Promise<void>
 export async function resendOtpHandler(req: Request, res: Response): Promise<void> {
   const result = await authService.resendOtp(req.body as RequestOtpInput, getRequestContext(req));
   sendSuccess(res, result, 'OTP resent successfully');
+}
+
+export async function inviteUserHandler(
+  req: AuthenticatedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) throw new AppError('Unauthenticated', 401);
+
+  const result = await authService.inviteUser(
+    req.body as InviteUserInput,
+    req.user.id,
+  );
+
+  sendCreated(res, result, 'User invitation created');
+}
+
+export async function acceptInviteHandler(req: Request, res: Response): Promise<void> {
+  const result = await authService.acceptInvite(
+    req.body as AcceptInviteInput,
+    getRequestContext(req),
+  );
+
+  sendSuccess(res, result, 'Invite accepted successfully');
 }
 
 export async function logoutHandler(req: Request, res: Response): Promise<void> {

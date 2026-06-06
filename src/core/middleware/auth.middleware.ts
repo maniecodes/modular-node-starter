@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/core/errors/AppError';
-import { verifyAccessToken } from './jwt';
+import { verifyAccessToken } from '../auth/jwt';
 import { AuthenticatedRequest } from '@/common/types';
-import { loadUserContext } from './user-context';
+import { loadUserContext } from '../auth/user-context';
 
 export async function requireAuth(
   req: Request,

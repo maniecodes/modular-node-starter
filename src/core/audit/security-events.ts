@@ -10,6 +10,8 @@ export type SecurityEventType =
   | 'refresh_success'
   | 'refresh_replay_denied'
   | 'password_reset_success'
+  | 'staff_invite_created'
+  | 'staff_invite_accepted'
   | 'logout_success'
   | 'role_assigned'
   | 'role_revoked'

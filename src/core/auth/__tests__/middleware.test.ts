@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { AppError } from '@/core/errors/AppError';
-import { requireAuth } from '../middleware';
+import { requireAuth } from '../../middleware/auth.middleware';
 import { AuthenticatedRequest } from '@/common/types';
 
 jest.mock('@/core/auth/jwt', () => ({

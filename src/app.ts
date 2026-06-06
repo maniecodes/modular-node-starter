@@ -11,6 +11,7 @@ import { apiLimiter, authLimiter } from '@/core/middleware/rate-limit';
 import { sendSuccess } from '@/common/helpers/response';
 
 import authRoutes from '@/modules/auth/routes/auth.routes';
+import adminRoutes from '@/modules/auth/routes/admin.routes';
 import usersRoutes from '@/modules/users/routes/users.routes';
 import { rolesRouter, permissionsRouter } from '@/modules/roles/routes/roles.routes';
 
@@ -34,6 +35,7 @@ app.get('/health', (_req, res) => {
 
 // Module routes
 app.use('/api/v1/auth', authLimiter, authRoutes);
+app.use('/api/v1/admin', apiLimiter, adminRoutes);
 app.use('/api/v1/users', apiLimiter, usersRoutes);
 app.use('/api/v1/roles', apiLimiter, rolesRouter);
 app.use('/api/v1/permissions', apiLimiter, permissionsRouter);

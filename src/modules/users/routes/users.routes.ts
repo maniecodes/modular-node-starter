@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Response, NextFunction } from 'express';
-import { requireAuth } from '@/core/auth/middleware';
-import { validate } from '@/core/validation/validate.middleware';
+import { requireAuth } from '@/core/middleware/auth.middleware';
+import { validate } from '@/core/middleware/validate.middleware';
 import { updateUserSchema } from '../validators/users.validator';
 import {
   deleteAccountHandler,
@@ -16,9 +16,9 @@ type AuthHandler = (req: AuthenticatedRequest, res: Response, next: NextFunction
 
 const wrap =
   (fn: AuthHandler) =>
-  (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-    fn(req, res, next).catch(next);
-  };
+    (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+      fn(req, res, next).catch(next);
+    };
 
 router.use(requireAuth);
 

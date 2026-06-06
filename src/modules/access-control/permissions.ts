@@ -22,7 +22,7 @@ export function permissionKey(resource: Resource, action: Action): string {
 
 export const DefaultRoles = {
   USER: 'user',
-  ADMIN: 'admin',
+  SUPER_ADMIN: 'super_admin',
 } as const;
 
 export type DefaultRole = (typeof DefaultRoles)[keyof typeof DefaultRoles];

@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { validate } from '@/core/validation/validate.middleware';
-import { requireAuth } from '@/core/auth/middleware';
+import { validate } from '@/core/middleware/validate.middleware';
+import { requireAuth } from '@/core/middleware/auth.middleware';
 import {
+  acceptInviteSchema,
   forgotPasswordSchema,
   loginSchema,
   logoutSchema,
@@ -12,6 +13,7 @@ import {
   verifyOtpSchema,
 } from '../validators/auth.validator';
 import {
+  acceptInviteHandler,
   loginHandler,
   logoutHandler,
   forgotPasswordHandler,
@@ -30,6 +32,7 @@ router.post('/logout', requireAuth, validate(logoutSchema), logoutHandler);
 router.post('/forgot-password', validate(forgotPasswordSchema), forgotPasswordHandler);
 router.post('/refresh', validate(refreshSchema), refreshHandler);
 router.post('/register', validate(registerSchema), registerHandler);
+router.post('/accept-invite', validate(acceptInviteSchema), acceptInviteHandler);
 router.post('/resend-otp', validate(resendOtpSchema), resendOtpHandler);
 router.post('/reset-password', validate(resetPasswordSchema), resetPasswordHandler);
 router.post('/verify-otp', validate(verifyOtpSchema), verifyOtpHandler);
