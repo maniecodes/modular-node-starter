@@ -510,28 +510,35 @@ export async function consumeRefreshToken(rawToken: string) {
   const tokenHash = hashToken(rawToken);
 
   return prisma.$transaction(async (tx) => {
-    const record = await tx.refreshToken.findUnique({ where: { tokenHash } });
+    const record = await tx.refreshToken.findUnique({ where: { tokenHash, revokedAt: null } });
     if (!record || record.expiresAt < new Date()) return null;
-    await tx.refreshToken.delete({ where: { tokenHash } });
+    await tx.refreshToken.update({
+      where: { tokenHash },
+      data: { revokedAt: new Date() },
+    });
     return record;
   });
 }
 
 /**
- *  Deletes a refresh token from the database, effectively revoking it. This is used during logout to invalidate the provided refresh token 
- *  so it can no longer be used to obtain new access tokens.
- * @param rawToken // The raw refresh token to be revoked
+ *  Revokes a refresh token by setting its revokedAt timestamp. 
+ *  This is used during logout or when a token compromise is suspected to invalidate the token and prevent further use.
+ * @param rawToken The raw refresh token to be revoked
  */
-// TODO:: instead of deleting the token record, we could keep it for audit purposes and just mark it as revoked with a timestamp. This would allow us to track when tokens were revoked and potentially identify suspicious activity.
 export async function revokeRefreshToken(rawToken: string): Promise<void> {
-  await prisma.refreshToken.deleteMany({
+  await prisma.refreshToken.updateMany({
     where: { tokenHash: hashToken(rawToken) },
+    data: { revokedAt: new Date() },
   });
 }
 
-/** Deletes all refresh tokens for a user (e.g. logout all devices). */
+/**
+ *  Revokes all refresh tokens for a given user by setting their revokedAt timestamp. 
+ *  This is used when a user changes their password or when a compromise is suspected to invalidate all existing tokens and require re-authentication.
+ * @param userId The ID of the user whose refresh tokens are to be revoked.
+ */
 export async function revokeAllRefreshTokens(userId: string): Promise<void> {
-  await prisma.refreshToken.deleteMany({ where: { userId } });
+  await prisma.refreshToken.updateMany({ where: { userId }, data: { revokedAt: new Date() } });
 }
 
 // ---------------------------------------------------------------------------

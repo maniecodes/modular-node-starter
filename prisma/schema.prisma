@@ -95,11 +95,12 @@ model RolePermission {
 }
 
 model RefreshToken {
-    id        String   @id @default(cuid())
+    id        String    @id @default(cuid())
     userId    String
-    tokenHash String   @unique
+    tokenHash String    @unique
+    revokedAt DateTime?
     expiresAt DateTime
-    createdAt DateTime @default(now())
+    createdAt DateTime  @default(now())
 
     user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
