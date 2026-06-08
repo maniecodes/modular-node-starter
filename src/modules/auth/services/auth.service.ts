@@ -5,6 +5,7 @@ import { AppError } from '@/core/errors/AppError';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '@/core/auth/jwt';
 import { securityEvent } from '@/core/audit/security-events';
 import { isLocked, recordFailedAttempt, clearAttempts } from '@/core/auth/login-protection';
+import { generateOtpCode } from '@/common/crypto/token';
 import { sendEmail } from '@/core/mail/mail.service';
 import { userInviteTemplate } from '@/core/mail/templates/user-invite.template';
 import { logger } from '@/common/utils/logger';
@@ -65,6 +66,14 @@ async function issueRefreshToken(userId: string): Promise<{ token: string; expir
   return { token, expiresAt };
 }
 
+/**
+ *  Helper function to construct a safe user object for inclusion in API responses, 
+ *  stripping out sensitive information and including only necessary details such as verified methods, roles, and permissions.
+ * @param user 
+ * @param roles 
+ * @param permissions 
+ * @returns 
+ */
 function buildSafeUser(
   user: {
     id: string;
@@ -94,10 +103,11 @@ function buildSafeUser(
   };
 }
 
-function generateOtpCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
+/**
+ *  Handler for verifying OTPs for both registration and password reset purposes.
+ * @param input 
+ * @returns 
+ */
 function resolveIdentifier(input: { email?: string; phone?: string }): {
   type: OtpType;
   target: string;
@@ -110,6 +120,15 @@ function resolveIdentifier(input: { email?: string; phone?: string }): {
   throw new AppError('Either email or phone is required', 400);
 }
 
+/**
+ *  Generates and stores an OTP code for a given target (email or phone) and purpose.
+ *  The OTP is hashed before storage for security, and an expiry time is set based on the environment configuration.
+ * @param target The email or phone number to which the OTP will be sent.
+ * @param type The type of OTP (email or phone).
+ * @param purpose The purpose of the OTP (e.g., registration, password reset).
+ * @param context Optional context information such as IP address and user agent, which can be used for auditing or security purposes.
+ * @returns An object containing the channel ('email' or 'phone') and the raw OTP code.
+ */
 async function generateAndStoreOtp(
   target: string,
   type: OtpType,
@@ -126,6 +145,12 @@ async function generateAndStoreOtp(
   return { channel: type === OtpType.EMAIL ? 'email' : 'phone', otpCode: code };
 }
 
+/**
+ *  Generates an OTP payload for registration purposes, including the raw OTP code, its encrypted version, and the expiry time.
+ * @param target The email or phone number to which the OTP will be sent.
+ * @param type The type of OTP (email or phone).
+ * @returns An object containing the raw OTP code, its encrypted version, and the expiry time.
+ */
 async function generateRegistrationOtpPayload(
   target: string,
   type: OtpType,
@@ -137,6 +162,13 @@ async function generateRegistrationOtpPayload(
   return { otpCode, encryptedCode, expiresAt };
 }
 
+/**
+ *  Consumes and validates an OTP code for a given target and purpose.
+ * @param input The input containing either email or phone and the OTP code to validate.
+ * @param purpose The purpose of the OTP (e.g., registration, password reset).
+ * @param context Optional context information such as IP address and user agent, which can be used for auditing or security purposes.
+ * @returns An object containing the user and the type of OTP (email or phone).
+ */
 async function consumeAndValidateOtp(
   input: VerifyOtpInput,
   purpose: OtpPurpose,
@@ -160,6 +192,12 @@ function buildInviteAcceptUrl(token: string): string {
   return `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`;
 }
 
+/**
+ *  Handler for user registration. It creates a new user account and sends a registration OTP to the user's email or phone for verification.
+ * @param input The input containing user registration details such as email, phone, password, and roles.
+ * @param context Optional context information such as IP address and user agent, which can be used for auditing or security purposes.
+ * @returns An object containing the newly created user, a flag indicating if OTP verification is required, the OTP code, and the OTP channel.
+ */
 export async function register(
   input: RegisterInput,
   context?: RequestContext,
@@ -240,8 +278,15 @@ export async function register(
   };
 }
 
+/**
+ *  Logins in a user by validating their credentials and returning access and refresh tokens.
+ * @param input The input containing user login details such as email, phone, and password.
+ * @param context Optional context information such as IP address and user agent, which can be used for auditing or security purposes.
+ * @returns An object containing the authenticated user and their access and refresh tokens.
+ */
 export async function login(input: LoginInput, context?: RequestContext): Promise<AuthResult> {
   const identifier = input.email ?? input.phone;
+  const password = input.password;
   if (!identifier) throw new AppError('Either email or phone is required', 400);
 
   // Check lockout before touching the DB — avoids unnecessary load under brute-force
@@ -269,7 +314,7 @@ export async function login(input: LoginInput, context?: RequestContext): Promis
     throw new AppError('Account is deactivated', 403);
   }
 
-  const isLoginMethodVerified = input.email ? user.isEmailVerified : user.isPhoneVerified;
+  const isLoginMethodVerified = identifier ? user.isEmailVerified : user.isPhoneVerified;
 
   if (!isLoginMethodVerified) {
     securityEvent('login_failure', {
@@ -286,7 +331,7 @@ export async function login(input: LoginInput, context?: RequestContext): Promis
     throw new AppError('Please verify this login channel with OTP before logging in', 403);
   }
 
-  const isValid = await bcrypt.compare(input.password, user.password);
+  const isValid = await bcrypt.compare(password, user.password);
   if (!isValid) {
     await recordFailedAttempt(identifier);
     securityEvent('login_failure', {
@@ -327,6 +372,12 @@ export async function forgotPassword(
   return generateAndStoreOtp(target, type, OtpPurpose.PASSWORD_RESET, context);
 }
 
+/**
+ *  Allows administrators to invite new users to the platform by creating an invitation and sending an email to the invitee.
+ * @param input The input containing the invitee's email, phone, roles, and optional invitation channel.
+ * @param invitedByUserId The ID of the user who is sending the invitation.
+ * @returns An object containing the invitation details, including the invite ID, accept URL, email, phone, channel, and expiration date.
+ */
 export async function inviteUser(
   input: InviteUserInput,
   invitedByUserId: string,
@@ -406,6 +457,12 @@ export async function inviteUser(
   };
 }
 
+/**
+ *  Allows invitees to accept a user invitation by validating the invitation token and setting up their account with a password and optional name details.
+ * @param input The input containing the invitation token, password, and optional name details.
+ * @param context The request context, including IP address and user agent.
+ * @returns An object containing the authenticated user and their tokens.
+ */
 export async function acceptInvite(
   input: AcceptInviteInput,
   context?: RequestContext,
@@ -449,6 +506,13 @@ export async function acceptInvite(
   return { user: safeUser, tokens: { accessToken, refreshToken } };
 }
 
+/**
+ *  Handler for verifying OTPs for registration purposes. 
+ *  It validates the provided OTP code, marks the user's email or phone as verified, and returns the authenticated user along with access and refresh tokens.
+ * @param input The input containing the OTP code and identifier (email or phone).
+ * @param context The request context, including IP address and user agent.
+ * @returns An object containing the authenticated user and their tokens.
+ */
 export async function verifyRegistrationOtp(
   input: VerifyRegistrationOtpInput,
   context?: RequestContext,
@@ -485,6 +549,13 @@ export async function verifyRegistrationOtp(
   return { user: safeUser, tokens: { accessToken, refreshToken } };
 }
 
+/**
+ *  Handler for verifying OTPs for password reset purposes. 
+ *  It validates the provided OTP code, generates a password reset token, and returns it to the user for use in the password reset process.
+ * @param input The input containing the OTP code and identifier (email or phone).
+ * @param context The request context, including IP address and user agent.
+ * @returns An object containing the password reset token.
+ */
 export async function verifyPasswordResetOtp(
   input: VerifyOtpInput,
   context?: RequestContext,
@@ -504,6 +575,12 @@ export async function verifyPasswordResetOtp(
   return { resetToken };
 }
 
+/**
+ *  Handler for resetting a user's password. 
+ *  It validates the provided password reset token, updates the user's password, and revokes all existing refresh tokens to log the user out of all sessions.
+ * @param input The input containing the password reset token and the new password.
+ * @param context The request context, including IP address and user agent.
+ */
 export async function resetPassword(
   input: ResetPasswordInput,
   context?: RequestContext,
@@ -527,6 +604,13 @@ export async function resetPassword(
   });
 }
 
+/**
+ *  Handler for resending OTP codes for both registration and password reset purposes. 
+ *  It generates a new OTP code, updates the existing OTP record in the database, and returns the new OTP code along with the channel through which it was sent.
+ * @param input The input containing either email or phone and the purpose for which the OTP is being resent (registration or password reset).
+ * @param context The request context, including IP address and user agent, which can be used for auditing or security purposes.
+ * @returns An object containing the channel ('email' or 'phone') and the new OTP code.
+ */
 export async function resendOtp(
   input: ResendOtpInput,
   context?: RequestContext,
@@ -548,6 +632,12 @@ export async function resendOtp(
   return { channel: type === OtpType.EMAIL ? 'email' : 'phone', otpCode };
 }
 
+/**
+ *  Handler for refreshing access tokens using a valid refresh token. 
+ *  It validates the provided refresh token, checks if it has been revoked or already used, and if valid, issues a new access token and refresh token pair.
+ * @param rawToken The raw refresh token to be validated and used for issuing new tokens.
+ * @returns A promise that resolves to an object containing the new access token and refresh token.
+ */
 export async function refreshTokens(rawToken: string): Promise<TokenPair> {
   let payload: { sub: string };
   try {
@@ -578,6 +668,10 @@ export async function refreshTokens(rawToken: string): Promise<TokenPair> {
   return { accessToken, refreshToken: newRefreshToken };
 }
 
+/**
+ *  Handler for logging out a user. It invalidates the provided refresh token, effectively logging the user out of all sessions that use that token.
+ * @param rawToken The raw refresh token to be invalidated.
+ */
 export async function logout(rawToken: string): Promise<void> {
   try {
     verifyRefreshToken(rawToken);
