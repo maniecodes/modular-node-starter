@@ -6,8 +6,17 @@ import { OtpPurpose, OtpType, Prisma } from '@prisma/client';
 import { OTP_EXPIRY_SKEW_MS, OTP_RESEND_COOLDOWN_MS, MAX_OTP_REQUESTS_PER_WINDOW } from '@/common/constants';
 import { generateInviteToken, hashToken } from '@/common/crypto/token';
 import { prisma } from '@/core/database/prisma';
+import { PASSWORD_RESET_TOKEN_EXPIRY_MINUTES, USER_INVITE_EXPIRES_HOURS } from '@/common/constants';
 
 
+/**
+ *  Helper function to acquire a PostgreSQL advisory lock for OTP operations. 
+ *  This ensures that concurrent requests for the same OTP target/type/purpose are serialized, preventing race conditions.
+ * @param tx // Prisma transaction client to execute the lock within
+ * @param target // The OTP target (e.g. email or phone number)
+ * @param type // The OTP type (e.g. 'EMAIL' or 'SMS')
+ * @param purpose // The OTP purpose (e.g. 'REGISTRATION', 'PASSWORD_RESET', etc.)
+ */
 async function lockOtpScope(
   tx: Prisma.TransactionClient,
   target: string,
@@ -18,7 +27,6 @@ async function lockOtpScope(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${scopeKey}))`;
 }
 
-/** Used by login — needs password for bcrypt comparison. */
 export async function findUserByEmail(email: string) {
   if (!email) return null;
 
@@ -59,7 +67,6 @@ export async function findUserByPhone(phone: string) {
   });
 }
 
-/** Used by token refresh — password not needed. */
 export async function findUserById(id: string) {
   return prisma.user.findUnique({
     where: { id },
@@ -76,7 +83,6 @@ export async function findUserById(id: string) {
   });
 }
 
-/** Used by registration. Returns the created user without the password field. */
 export async function createUser(data: {
   firstName: string;
   lastName: string;
@@ -144,6 +150,16 @@ export async function assignRolesToUser(
   );
 }
 
+/**
+ *  Helper function to create a new user with assigned roles and an OTP code in a single transaction. 
+ *  This is used during registration flows where we want to create the user, assign them default roles, 
+ *  and generate an OTP for verification all atomically.
+ * @param data // The user data for creating the new user
+ * @param roleIds // An array of role IDs to assign to the new user
+ * @param otp // The OTP details including target, type, purpose, code, and expiry
+ * @param context // Optional context for logging the OTP request (e.g. IP address, user agent)
+ * @returns 
+ */
 export async function createUserWithRolesAndOtp(
   data: {
     firstName: string;
@@ -216,6 +232,14 @@ export async function createUserWithRolesAndOtp(
   });
 }
 
+/** 
+ *  Helper function to find the latest pending OTP for a given target/type/purpose. 
+ *  This is used to check if there's an active OTP that can be resent or needs to be consumed.
+ * @param target // The target identifier for the OTP (e.g. email or phone number)
+ * @param type // The type of OTP (e.g. EMAIL, SMS)
+ * @param purpose // The purpose of the OTP (e.g. REGISTRATION, PASSWORD_RESET)
+ * @returns // The latest pending OTP record without the code
+ */
 export async function findLatestPendingOtp(
   target: string,
   type: OtpType,
@@ -426,6 +450,12 @@ export async function findUserRoleNames(userId: string): Promise<string[]> {
   return userRoles.map((ur) => ur.role.name);
 }
 
+/**
+ *  Helper function to find all permission keys (in the format "resource.action") for a user based on their assigned roles. 
+ *  This is used during authorization checks to determine if a user has the necessary permissions to perform an action.
+ * @param userId // The ID of the user for whom to retrieve permission keys
+ * @returns An array of permission keys that the user has through their roles
+ */
 export async function findUserPermissionKeys(userId: string): Promise<string[]> {
   const userRoles = await prisma.userRole.findMany({
     where: { userId },
@@ -487,7 +517,12 @@ export async function consumeRefreshToken(rawToken: string) {
   });
 }
 
-/** Deletes a refresh token by its raw value (used on logout). Idempotent. */
+/**
+ *  Deletes a refresh token from the database, effectively revoking it. This is used during logout to invalidate the provided refresh token 
+ *  so it can no longer be used to obtain new access tokens.
+ * @param rawToken // The raw refresh token to be revoked
+ */
+// TODO:: instead of deleting the token record, we could keep it for audit purposes and just mark it as revoked with a timestamp. This would allow us to track when tokens were revoked and potentially identify suspicious activity.
 export async function revokeRefreshToken(rawToken: string): Promise<void> {
   await prisma.refreshToken.deleteMany({
     where: { tokenHash: hashToken(rawToken) },
@@ -503,11 +538,13 @@ export async function revokeAllRefreshTokens(userId: string): Promise<void> {
 // Password reset token storage
 // ---------------------------------------------------------------------------
 
-const PASSWORD_RESET_TOKEN_EXPIRY_MINUTES = 15;
-
 /**
- * Creates a hashed password reset token for the user and stores it in DB.
- * Returns the raw (unhashed) token to be sent to the client.
+ *  Generates a secure random token for password reset, stores its hash in the database with an expiry time, and returns the raw token. 
+ *  This is used during the forgot password flow to create a one-time token that can be sent to the user's email or phone 
+ *  for verification before allowing them to reset their password.
+ * @param userId The ID of the user for whom the password reset token is being generated.
+ * @param context Optional context information such as IP address and user agent, which can be used for auditing or security purposes.
+ * @returns The raw password reset token that can be sent to the user for verification. The hashed version of this token is stored in the database for secure comparison during token consumption.
  */
 export async function storePasswordResetToken(
   userId: string,
@@ -538,8 +575,11 @@ export async function storePasswordResetToken(
 }
 
 /**
- * Validates a raw reset token by comparing its hash, then marks it as used.
- * Returns the userId if valid, null otherwise.
+ *  Verifies a password reset token by checking if its hash exists in the database, is not expired, and has not been used or revoked. 
+ *  If valid, it marks the token as used and returns the associated user ID. 
+ *  This is used during the password reset flow to validate the token provided by the user before allowing them to set a new password.
+ * @param rawToken The raw password reset token provided by the user. This token will be hashed and compared against the stored hash in the database for verification.
+ * @returns The user ID associated with the valid token, or null if the token is invalid, expired, used, or revoked.
  */
 export async function consumePasswordResetToken(rawToken: string): Promise<string | null> {
   const tokenHash = hashToken(rawToken);
@@ -557,14 +597,18 @@ export async function consumePasswordResetToken(rawToken: string): Promise<strin
   });
 }
 
-const USER_INVITE_EXPIRES_HOURS = 48;
-
 type CreateUserInviteParams = {
   email: string;
   createdBy: string;
   roleIds: string[];
 };
 
+/**
+ *  Creates a new user invite with a unique token, stores its hash in the database with an expiry time, and returns the raw token along with invite details. 
+ *  This is used to invite new users to the platform by generating a one-time token that can be sent to their email, allowing them to accept the invite and create an account with pre-assigned roles.
+ * @param params The parameters for creating the user invite, including email, creator, and role IDs.
+ * @returns The invite details including invite ID, raw token, and expiry date.
+ */
 export async function createUserInvite(params: CreateUserInviteParams): Promise<{
   inviteId: string;
   rawToken: string;
@@ -604,6 +648,13 @@ export async function createUserInvite(params: CreateUserInviteParams): Promise<
   return { inviteId: invite.id, rawToken, expiresAt };
 }
 
+/**
+ *  Verifies a user invite token by checking if its hash exists in the database, is not expired, and has not been used. 
+ *  If valid, it marks the invite as used and returns the invite details including email and associated role IDs. 
+ *  This is used during the user onboarding flow when accepting an invite to create an account with pre-assigned roles.
+ * @param rawToken The raw invite token provided by the user when accepting the invite. This token will be hashed and compared against the stored hash in the database for verification.
+ * @returns The invite details including email and associated role IDs, or null if the token is invalid or expired.
+ */
 export async function consumeUserInvite(rawToken: string): Promise<{
   id: string;
   email: string;
@@ -645,6 +696,12 @@ export async function consumeUserInvite(rawToken: string): Promise<{
   });
 }
 
+/**
+ *  Helper function to create a new user based on an accepted invite, assign them the roles specified in the invite, and mark the invite as used. 
+ *  This is used during the onboarding flow when a user accepts an invite and we need to create their account with the appropriate roles.
+ * @param input The input parameters for creating the invited user, including personal details, password, role IDs, and optionally the ID of the user who assigned the roles.
+ * @returns The newly created user with their assigned roles.
+ */
 export async function createInvitedUserWithRoles(input: {
   firstName: string;
   lastName: string;
