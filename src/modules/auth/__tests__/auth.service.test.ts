@@ -129,11 +129,11 @@ describe('authService.resendOtp', () => {
       new AppError('Please wait 45 seconds before requesting another OTP', 429),
     );
 
-    await expect(authService.resendOtp({ email: 'sam@gmail.com.com' })).rejects.toThrow(
+    await expect(authService.resendOtp({ email: 'sam@gmail.com' })).rejects.toThrow(
       new AppError('Please wait 45 seconds before requesting another OTP', 429),
     );
     expect(mockRepo.resendOtpCode).toHaveBeenCalledWith(
-      'sam@gmail.com.com',
+      'sam@gmail.com',
       'EMAIL',
       expect.any(String),
       expect.any(Date),
@@ -146,10 +146,10 @@ describe('authService.resendOtp', () => {
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('hashed_otp');
     mockRepo.resendOtpCode.mockResolvedValueOnce('REGISTRATION' as never);
 
-    const result = await authService.resendOtp({ email: 'sam@gmail.com.com' });
+    const result = await authService.resendOtp({ email: 'sam@gmail.com' });
 
     expect(mockRepo.resendOtpCode).toHaveBeenCalledWith(
-      'sam@gmail.com.com',
+      'sam@gmail.com',
       'EMAIL',
       'hashed_otp',
       expect.any(Date),
@@ -163,10 +163,10 @@ describe('authService.resendOtp', () => {
   it('forwards the explicit purpose to the repository helper', async () => {
     mockRepo.resendOtpCode.mockResolvedValueOnce('PASSWORD_RESET' as never);
 
-    await authService.resendOtp({ email: 'sam@gmail.com.com', purpose: 'PASSWORD_RESET' });
+    await authService.resendOtp({ email: 'sam@gmail.com', purpose: 'PASSWORD_RESET' });
 
     expect(mockRepo.resendOtpCode).toHaveBeenCalledWith(
-      'sam@gmail.com.com',
+      'sam@gmail.com',
       'EMAIL',
       expect.any(String),
       expect.any(Date),
@@ -187,7 +187,7 @@ describe('authService.register', () => {
       authService.register({
         firstName: 'Sam',
         lastName: 'John',
-        email: 'sam@gmail.com.com',
+        email: 'sam@gmail.com',
         roles: ['user'],
         password: 'Password1',
       }),
@@ -204,7 +204,7 @@ describe('authService.register', () => {
     await authService.register({
       firstName: 'Sam',
       lastName: 'John',
-      email: 'sam@gmail.com.com',
+      email: 'sam@gmail.com',
       roles: ['user'],
       password: 'Password1',
     });
@@ -223,12 +223,12 @@ describe('authService.register', () => {
     const result = await authService.register({
       firstName: 'Sam',
       lastName: 'John',
-      email: 'sam@gmail.com.com',
+      email: 'sam@gmail.com',
       roles: ['user'],
       password: 'Password1',
     });
 
-    expect(result.user.email).toBe('sam@gmail.com.com');
+    expect(result.user.email).toBe('sam@gmail.com');
     expect(result.user.roles).toEqual(['user']);
     expect(result.user.permissions).toEqual(['users.read']);
     expect(result.requiresOtpVerification).toBe(true);
@@ -239,13 +239,13 @@ describe('authService.register', () => {
       {
         firstName: 'Sam',
         lastName: 'John',
-        email: 'sam@gmail.com.com',
+        email: 'sam@gmail.com',
         phone: undefined,
         password: 'hashed_pw',
       },
       ['role-1'],
       {
-        target: 'sam@gmail.com.com',
+        target: 'sam@gmail.com',
         type: 'EMAIL',
         purpose: 'REGISTRATION',
         code: 'hashed_otp',
@@ -263,7 +263,7 @@ describe('authService.register', () => {
       authService.register({
         firstName: 'Sam',
         lastName: 'John',
-        email: 'sam@gmail.com.com',
+        email: 'sam@gmail.com',
         roles: ['missing_role'],
         password: 'Password1',
       }),
@@ -289,7 +289,7 @@ describe('authService.verifyRegistrationOtp', () => {
     mockSignAccess.mockReturnValueOnce('access');
 
     const result = await authService.verifyRegistrationOtp({
-      email: 'sam@gmail.com.com',
+      email: 'sam@gmail.com',
       otpCode: '123456',
     });
 
@@ -304,7 +304,7 @@ describe('authService.verifyRegistrationOtp', () => {
 
     await expect(
       authService.verifyRegistrationOtp({
-        email: 'sam@gmail.com.com',
+        email: 'sam@gmail.com',
         otpCode: '123456',
       }),
     ).rejects.toThrow(new AppError('Invalid or expired OTP code', 401));
@@ -383,7 +383,7 @@ describe('authService.loginWithGoogle', () => {
   it('links google identity to an existing email account when not linked yet', async () => {
     mockSocialAuthProvider.verifyGoogleIdToken.mockResolvedValueOnce({
       sub: 'google-sub-123',
-      email: 'sam@gmail.com.com',
+      email: 'sam@gmail.com',
       email_verified: true,
       given_name: 'Sam',
       family_name: 'John',
@@ -404,7 +404,7 @@ describe('authService.loginWithGoogle', () => {
       provider: 'google',
       providerUserId: 'google-sub-123',
       userId: 'user-1',
-      providerEmail: 'sam@gmail.com.com',
+      providerEmail: 'sam@gmail.com',
     });
     expect(result.tokens.accessToken).toBe('access');
     expect(result.tokens.refreshToken).toBe('refresh');
@@ -413,7 +413,7 @@ describe('authService.loginWithGoogle', () => {
   it('throws 409 when account is already linked to a different google sub', async () => {
     mockSocialAuthProvider.verifyGoogleIdToken.mockResolvedValueOnce({
       sub: 'google-sub-new',
-      email: 'sam@gmail.com.com',
+      email: 'sam@gmail.com',
       email_verified: true,
     });
 
@@ -422,7 +422,7 @@ describe('authService.loginWithGoogle', () => {
     mockRepo.findSocialIdentityByUser.mockResolvedValueOnce({
       userId: 'user-1',
       providerUserId: 'google-sub-old',
-      providerEmail: 'sam@gmail.com.com',
+      providerEmail: 'sam@gmail.com',
     } as never);
 
     await expect(
@@ -445,7 +445,7 @@ describe('authService.loginWithFacebook', () => {
     });
     mockSocialAuthProvider.fetchFacebookProfile.mockResolvedValueOnce({
       id: 'fb-user-123',
-      email: 'sam@gmail.com.com',
+      email: 'sam@gmail.com',
       first_name: 'Sam',
       last_name: 'John',
       name: 'Sam John',
@@ -471,7 +471,7 @@ describe('authService.loginWithFacebook', () => {
       provider: 'facebook',
       providerUserId: 'fb-user-123',
       userId: 'user-1',
-      providerEmail: 'sam@gmail.com.com',
+      providerEmail: 'sam@gmail.com',
     });
     expect(result.tokens.accessToken).toBe('access');
     expect(result.tokens.refreshToken).toBe('refresh');
@@ -500,7 +500,7 @@ describe('authService.loginWithGoogleCallback', () => {
     });
     mockSocialAuthProvider.verifyGoogleIdToken.mockResolvedValueOnce({
       sub: 'google-sub-callback',
-      email: 'sam@gmail.com.com',
+      email: 'sam@gmail.com',
       email_verified: true,
       given_name: 'Sam',
       family_name: 'John',
@@ -546,7 +546,7 @@ describe('authService.loginWithFacebookCallback', () => {
     });
     mockSocialAuthProvider.fetchFacebookProfile.mockResolvedValueOnce({
       id: 'fb-user-callback',
-      email: 'sam@gmail.com.com',
+      email: 'sam@gmail.com',
       first_name: 'Sam',
       last_name: 'John',
     });
@@ -701,7 +701,7 @@ describe('authService.login', () => {
     } as never);
 
     await expect(
-      authService.login({ email: 'sam@gmail.com.com', password: 'Password1' }),
+      authService.login({ email: 'sam@gmail.com', password: 'Password1' }),
     ).rejects.toThrow(new AppError('Account is deactivated', 403));
   });
 
@@ -712,7 +712,7 @@ describe('authService.login', () => {
     } as never);
 
     await expect(
-      authService.login({ email: 'sam@gmail.com.com', password: 'Password1' }),
+      authService.login({ email: 'sam@gmail.com', password: 'Password1' }),
     ).rejects.toThrow(
       new AppError('Please verify this login channel with OTP before logging in', 403),
     );
@@ -723,7 +723,7 @@ describe('authService.login', () => {
     (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
 
     await expect(
-      authService.login({ email: 'sam@gmail.com.com', password: 'wrong' }),
+      authService.login({ email: 'sam@gmail.com', password: 'wrong' }),
     ).rejects.toThrow(new AppError('Invalid credentials', 401));
   });
 
@@ -735,9 +735,9 @@ describe('authService.login', () => {
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
-    const result = await authService.login({ email: 'sam@gmail.com.com', password: 'Password1' });
+    const result = await authService.login({ email: 'sam@gmail.com', password: 'Password1' });
 
-    expect(result.user.email).toBe('sam@gmail.com.com');
+    expect(result.user.email).toBe('sam@gmail.com');
     expect(result.user.roles).toEqual(['super_admin']);
     expect(result.user.permissions).toEqual(['users.read', 'roles.assign']);
     expect(result.user).not.toHaveProperty('password');
@@ -753,7 +753,7 @@ describe('authService.login', () => {
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
-    await authService.login({ email: 'sam@gmail.com.com', password: 'Password1' });
+    await authService.login({ email: 'sam@gmail.com', password: 'Password1' });
 
     expect(mockRepo.storeRefreshToken).toHaveBeenCalledWith('user-1', 'refresh', expect.any(Date));
   });
@@ -762,7 +762,7 @@ describe('authService.login', () => {
     mockLoginProtection.isLocked.mockResolvedValue(true);
 
     await expect(
-      authService.login({ email: 'sam@gmail.com.com', password: 'Password1' }),
+      authService.login({ email: 'sam@gmail.com', password: 'Password1' }),
     ).rejects.toThrow(new AppError('Too many failed login attempts. Please try again later.', 429));
 
     expect(mockRepo.findUserByEmail).not.toHaveBeenCalled();
@@ -773,10 +773,10 @@ describe('authService.login', () => {
     (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
 
     await expect(
-      authService.login({ email: 'sam@gmail.com.com', password: 'wrong' }),
+      authService.login({ email: 'sam@gmail.com', password: 'wrong' }),
     ).rejects.toThrow();
 
-    expect(mockLoginProtection.recordFailedAttempt).toHaveBeenCalledWith('sam@gmail.com.com');
+    expect(mockLoginProtection.recordFailedAttempt).toHaveBeenCalledWith('sam@gmail.com');
   });
 
   it('records a failed attempt when user is not found', async () => {
@@ -795,9 +795,9 @@ describe('authService.login', () => {
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
-    await authService.login({ email: 'sam@gmail.com.com', password: 'Password1' });
+    await authService.login({ email: 'sam@gmail.com', password: 'Password1' });
 
-    expect(mockLoginProtection.clearAttempts).toHaveBeenCalledWith('sam@gmail.com.com');
+    expect(mockLoginProtection.clearAttempts).toHaveBeenCalledWith('sam@gmail.com');
   });
 });
 

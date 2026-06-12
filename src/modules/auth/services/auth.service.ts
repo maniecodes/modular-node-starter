@@ -556,6 +556,10 @@ export async function login(input: LoginInput, context?: RequestContext): Promis
     throw new AppError('Please verify this login channel with OTP before logging in', 403);
   }
 
+  if (!user.password) {
+    throw new AppError('This account uses social login. Please sign in with your provider.', 401)
+  }
+
   const isValid = await bcrypt.compare(password, user.password);
   if (!isValid) {
     await recordFailedAttempt(identifier);

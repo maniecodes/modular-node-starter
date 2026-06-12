@@ -202,19 +202,18 @@ export async function findSocialIdentityByUser(
   return identity;
 }
 
-export async function findAuthIdentity(userId: string): Promise<boolean> {
-  const identity = await prisma.authIdentity.findFirst({
+export async function findAuthIdentity(userId: string) {
+  return await prisma.authIdentity.findFirst({
     where: {
       userId,
     },
     select: {
       userId: true,
+      provider: true,
       providerUserId: true,
       providerEmail: true,
     }
-  })
-
-  return identity ? true : false;
+  });
 }
 
 export async function linkSocialIdentity(input: {
