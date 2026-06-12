@@ -6,7 +6,7 @@ import { OtpPurpose, OtpType, Prisma } from '@prisma/client';
 import { OTP_EXPIRY_SKEW_MS, OTP_RESEND_COOLDOWN_MS, MAX_OTP_REQUESTS_PER_WINDOW } from '@/common/constants';
 import { generateInviteToken, hashToken } from '@/common/crypto/token';
 import { prisma } from '@/core/database/prisma';
-import { PASSWORD_RESET_TOKEN_EXPIRY_MINUTES, USER_INVITE_EXPIRES_HOURS } from '@/common/constants';
+import { PASSWORD_RESET_TOKEN_EXPIRY_MINUTES, INVITE_TOKEN_EXPIRY_HOURS, SOCIAL_AUTH_PROVIDERS } from '@/common/constants';
 
 
 /**
@@ -104,6 +104,157 @@ export async function createUser(data: {
     },
   });
 }
+
+export async function createUserWithRoles(
+  data: {
+    firstName: string;
+    lastName: string;
+    email?: string;
+    phone?: string;
+    password: string;
+    isVerified?: boolean;
+    isEmailVerified?: boolean;
+    isPhoneVerified?: boolean;
+  },
+  roleIds: string[],
+  assignedBy?: string,
+) {
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        isVerified: true,
+        isEmailVerified: true,
+        isPhoneVerified: true,
+      },
+    });
+
+    await Promise.all(
+      roleIds.map((roleId) =>
+        tx.userRole.upsert({
+          where: { userId_roleId: { userId: user.id, roleId } },
+          update: {},
+          create: {
+            userId: user.id,
+            roleId,
+            assignedBy: assignedBy ?? user.id,
+          },
+        }),
+      ),
+    );
+
+    return user;
+  });
+}
+
+type SocialIdentityUserRow = {
+  userId: string;
+  providerUserId: string;
+  providerEmail: string | null;
+};
+
+export async function findSocialIdentityUser(
+  provider: typeof SOCIAL_AUTH_PROVIDERS[0 | 1],
+  providerUserId: string,
+): Promise<SocialIdentityUserRow | null> {
+  const identity = await prisma.authIdentity.findFirst({
+    where: {
+      provider,
+      providerUserId,
+    },
+    select: {
+      userId: true,
+      providerUserId: true,
+      providerEmail: true,
+    },
+  });
+
+  return identity;
+}
+
+type SocialIdentityRow = {
+  userId: string;
+  providerUserId: string;
+  providerEmail: string | null;
+};
+
+export async function findSocialIdentityByUser(
+  provider: typeof SOCIAL_AUTH_PROVIDERS[0 | 1],
+  userId: string,
+): Promise<SocialIdentityRow | null> {
+  const identity = await prisma.authIdentity.findFirst({
+    where: {
+      provider,
+      userId,
+    },
+    select: {
+      userId: true,
+      providerUserId: true,
+      providerEmail: true,
+    },
+  });
+
+  return identity;
+}
+
+export async function findAuthIdentity(userId: string): Promise<boolean> {
+  const identity = await prisma.authIdentity.findFirst({
+    where: {
+      userId,
+    },
+    select: {
+      userId: true,
+      providerUserId: true,
+      providerEmail: true,
+    }
+  })
+
+  return identity ? true : false;
+}
+
+export async function linkSocialIdentity(input: {
+  provider: typeof SOCIAL_AUTH_PROVIDERS[0 | 1];
+  providerUserId: string;
+  userId: string;
+  providerEmail?: string | null;
+}): Promise<void> {
+  try {
+    await prisma.authIdentity.create({
+      data: {
+        provider: input.provider,
+        providerUserId: input.providerUserId,
+        userId: input.userId,
+        providerEmail: input.providerEmail ?? null,
+      },
+    });
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code !== 'P2002') {
+      throw err;
+    }
+
+    const linkedIdentity = await findSocialIdentityUser(input.provider, input.providerUserId);
+    if (linkedIdentity) {
+      if (linkedIdentity.userId === input.userId) {
+        return;
+      }
+
+      throw new AppError('Social identity is already linked to another account', 409);
+    }
+
+    const linkedIdentityForUser = await findSocialIdentityByUser(input.provider, input.userId);
+    if (linkedIdentityForUser && linkedIdentityForUser.providerUserId !== input.providerUserId) {
+      throw new AppError(`This account is already linked to a different ${input.provider} identity`, 409);
+    }
+
+    throw new AppError('Social identity is already linked to another account', 409);
+  }
+}
+
 
 export async function markUserAsVerified(userId: string, method: OtpType): Promise<void> {
   const data =
@@ -510,11 +661,10 @@ export async function consumeRefreshToken(rawToken: string) {
   const tokenHash = hashToken(rawToken);
 
   return prisma.$transaction(async (tx) => {
-    const record = await tx.refreshToken.findUnique({ where: { tokenHash, revokedAt: null } });
+    const record = await tx.refreshToken.findUnique({ where: { tokenHash } });
     if (!record || record.expiresAt < new Date()) return null;
-    await tx.refreshToken.update({
+    await tx.refreshToken.delete({
       where: { tokenHash },
-      data: { revokedAt: new Date() },
     });
     return record;
   });
@@ -526,9 +676,8 @@ export async function consumeRefreshToken(rawToken: string) {
  * @param rawToken The raw refresh token to be revoked
  */
 export async function revokeRefreshToken(rawToken: string): Promise<void> {
-  await prisma.refreshToken.updateMany({
+  await prisma.refreshToken.deleteMany({
     where: { tokenHash: hashToken(rawToken) },
-    data: { revokedAt: new Date() },
   });
 }
 
@@ -538,7 +687,7 @@ export async function revokeRefreshToken(rawToken: string): Promise<void> {
  * @param userId The ID of the user whose refresh tokens are to be revoked.
  */
 export async function revokeAllRefreshTokens(userId: string): Promise<void> {
-  await prisma.refreshToken.updateMany({ where: { userId }, data: { revokedAt: new Date() } });
+  await prisma.refreshToken.deleteMany({ where: { userId } });
 }
 
 // ---------------------------------------------------------------------------
@@ -623,7 +772,7 @@ export async function createUserInvite(params: CreateUserInviteParams): Promise<
 }> {
   const rawToken = generateInviteToken();
   const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date(Date.now() + USER_INVITE_EXPIRES_HOURS * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + INVITE_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
 
   const invite = await prisma.$transaction(async (tx) => {
     // Invalidate any previously active invite for this email to prevent parallel valid invites.

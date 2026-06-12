@@ -2,8 +2,11 @@ import { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
 import {
   AcceptInviteInput,
+  FacebookLoginInput,
   InviteUserInput,
   LoginInput,
+  GoogleLoginInput,
+  OAuthCallbackQueryInput,
   RefreshInput,
   RegisterInput,
   RequestContext,
@@ -73,6 +76,60 @@ export async function registerHandler(req: Request, res: Response): Promise<void
 export async function loginHandler(req: Request, res: Response): Promise<void> {
   const result = await authService.login(req.body as LoginInput);
   sendSuccess(res, result, 'Login successful');
+}
+
+/**
+ *  Handler for Google login. It verifies the Google ID token and returns access and refresh tokens.
+ *  endpoint: POST /api/v1/auth/login/google
+ *
+ * @param req
+ * @param res
+ */
+export async function googleLoginHandler(req: Request, res: Response): Promise<void> {
+  const result = await authService.loginWithGoogle(
+    req.body as GoogleLoginInput,
+    getRequestContext(req),
+  );
+  sendSuccess(res, result, 'Google login successful');
+}
+
+/**
+ *  Handler for Facebook login. It verifies the Facebook access token and returns access and refresh tokens.
+ *  endpoint: POST /api/v1/auth/login/facebook
+ *
+ * @param req
+ * @param res
+ */
+export async function facebookLoginHandler(req: Request, res: Response): Promise<void> {
+  const result = await authService.loginWithFacebook(
+    req.body as FacebookLoginInput,
+    getRequestContext(req),
+  );
+  sendSuccess(res, result, 'Facebook login successful');
+}
+
+/**
+ *  Handler for Google OAuth callback code exchange.
+ *  endpoint: GET /api/v1/auth/callback/google
+ */
+export async function googleCallbackHandler(req: Request, res: Response): Promise<void> {
+  const result = await authService.loginWithGoogleCallback(
+    req.query as unknown as OAuthCallbackQueryInput,
+    getRequestContext(req),
+  );
+  sendSuccess(res, result, 'Google callback login successful');
+}
+
+/**
+ *  Handler for Facebook OAuth callback code exchange.
+ *  endpoint: GET /api/v1/auth/callback/facebook
+ */
+export async function facebookCallbackHandler(req: Request, res: Response): Promise<void> {
+  const result = await authService.loginWithFacebookCallback(
+    req.query as unknown as OAuthCallbackQueryInput,
+    getRequestContext(req),
+  );
+  sendSuccess(res, result, 'Facebook callback login successful');
 }
 
 /**

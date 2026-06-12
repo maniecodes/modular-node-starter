@@ -142,17 +142,21 @@ All endpoints are prefixed with `/api/v1`.
 
 ### Auth — `/api/v1/auth`
 
-| Method | Endpoint           | Auth   | Description                               |
-| ------ | ------------------ | ------ | ----------------------------------------- |
-| `POST` | `/register`        | —      | Request registration OTP (email or phone) |
-| `POST` | `/verify-otp`      | —      | Verify OTP and activate account           |
-| `POST` | `/resend-otp`      | —      | Resend a new OTP                          |
-| `POST` | `/login`           | —      | Login and receive access + refresh tokens |
-| `POST` | `/refresh`         | —      | Exchange refresh token for new token pair |
-| `POST` | `/logout`          | Bearer | Revoke the current refresh token          |
-| `POST` | `/forgot-password` | —      | Send a password-reset OTP                 |
-| `POST` | `/reset-password`  | —      | Reset password using the OTP token        |
-| `POST` | `/accept-invite`   | —      | Accept an admin invite and set password   |
+| Method | Endpoint             | Auth   | Description                                  |
+| ------ | -------------------- | ------ | -------------------------------------------- |
+| `POST` | `/register`          | —      | Request registration OTP (email or phone)    |
+| `POST` | `/verify-otp`        | —      | Verify OTP and activate account              |
+| `POST` | `/resend-otp`        | —      | Resend a new OTP                             |
+| `POST` | `/login`             | —      | Login and receive access + refresh tokens    |
+| `POST` | `/login/google`      | —      | Google Sign-In with ID token                 |
+| `GET`  | `/callback/google`   | —      | Google OAuth callback (auth code exchange)   |
+| `POST` | `/login/facebook`    | —      | Facebook Sign-In with access token           |
+| `GET`  | `/callback/facebook` | —      | Facebook OAuth callback (auth code exchange) |
+| `POST` | `/refresh`           | —      | Exchange refresh token for new token pair    |
+| `POST` | `/logout`            | Bearer | Revoke the current refresh token             |
+| `POST` | `/forgot-password`   | —      | Send a password-reset OTP                    |
+| `POST` | `/reset-password`    | —      | Reset password using the OTP token           |
+| `POST` | `/accept-invite`     | —      | Accept an admin invite and set password      |
 
 ### Admin — `/api/v1/admin`
 
@@ -193,6 +197,50 @@ All endpoints are prefixed with `/api/v1`.
 | `GET`    | `/`      | `permissions.read`   | List all permissions |
 | `POST`   | `/`      | `permissions.create` | Create a permission  |
 | `DELETE` | `/:id`   | `permissions.delete` | Delete a permission  |
+
+### Google Login Setup
+
+1. Create a Google OAuth web client and copy the Client ID.
+2. Set `GOOGLE_CLIENT_ID` in your environment file.
+3. From the frontend, obtain a Google ID token and send it to:
+
+```http
+POST /api/v1/auth/login/google
+Content-Type: application/json
+
+{
+    "idToken": "<google-id-token>"
+}
+```
+
+4. On first login, the backend auto-creates a verified account, assigns the default `user` role, links the Google `sub` to that account, and returns normal JWT access/refresh tokens.
+5. For OAuth code flow, register callback redirect URI:
+
+```text
+http://localhost:3000/api/v1/auth/callback/google
+```
+
+### Facebook Login Setup
+
+1. Create a Facebook app and enable Facebook Login for your client app.
+2. Set `FACEBOOK_APP_ID` and `FACEBOOK_APP_SECRET` in your environment file.
+3. From the frontend, obtain a Facebook user access token and send it to:
+
+```http
+POST /api/v1/auth/login/facebook
+Content-Type: application/json
+
+{
+    "accessToken": "<facebook-user-access-token>"
+}
+```
+
+4. The backend validates the token against Facebook Graph API, resolves profile email, links provider identity (`provider + user_id`), and returns standard access/refresh tokens.
+5. For OAuth code flow, register callback redirect URI:
+
+```text
+http://localhost:3000/api/v1/auth/callback/facebook
+```
 
 ---
 

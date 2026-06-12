@@ -23,7 +23,7 @@ model User {
     lastName        String
     email           String?  @unique
     phone           String?  @unique
-    password        String
+    password        String?
     isActive        Boolean  @default(true)
     isVerified      Boolean  @default(false)
     isEmailVerified Boolean  @default(false)
@@ -34,8 +34,26 @@ model User {
     roles         UserRole[]
     refreshTokens RefreshToken[]
     resetTokens   PasswordResetToken[]
+    identities    AuthIdentity[]
 
     @@map("users")
+}
+
+model AuthIdentity {
+    id             String   @id @default(cuid())
+    provider       String
+    providerUserId String
+    providerEmail  String?
+    userId         String
+    createdAt      DateTime @default(now())
+    updatedAt      DateTime @updatedAt
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([provider, providerUserId])
+    @@unique([provider, userId])
+    @@index([userId])
+    @@map("auth_identities")
 }
 
 model Role {
@@ -71,10 +89,8 @@ model UserRole {
     assignedAt DateTime @default(now())
     assignedBy String?
 
-    user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-    role         Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
-    userInvite   UserInvite? @relation(fields: [userInviteId], references: [id])
-    userInviteId String?
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+    role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
     @@id([userId, roleId])
     @@map("user_roles")
@@ -85,10 +101,8 @@ model RolePermission {
     permissionId String
     assignedAt   DateTime @default(now())
 
-    role         Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
-    permission   Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-    userInvite   UserInvite? @relation(fields: [userInviteId], references: [id])
-    userInviteId String?
+    role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+    permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
     @@id([roleId, permissionId])
     @@map("role_permissions")
@@ -180,11 +194,10 @@ model UserInvite {
 
     createdAt DateTime @default(now())
 
-    users           UserRole[]
     userInviteRoles UserInviteRole[]
-    rolePermissions RolePermission[]
 
     @@index([email])
+    @@map("user_invites")
 }
 
 model UserInviteRole {

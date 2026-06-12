@@ -1,22 +1,34 @@
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { OtpPurpose, OtpType } from '@prisma/client';
 import { env } from '@/core/config/env';
 import { AppError } from '@/core/errors/AppError';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '@/core/auth/jwt';
+import {
+  exchangeFacebookAuthorizationCode,
+  exchangeGoogleAuthorizationCode,
+  fetchFacebookProfile,
+  verifyGoogleIdToken,
+  verifyFacebookAccessToken,
+} from '@/core/auth/social-auth-provider.service';
 import { securityEvent } from '@/core/audit/security-events';
 import { isLocked, recordFailedAttempt, clearAttempts } from '@/core/auth/login-protection';
 import { generateOtpCode } from '@/common/crypto/token';
 import { sendEmail } from '@/core/mail/mail.service';
 import { userInviteTemplate } from '@/core/mail/templates/user-invite.template';
 import { logger } from '@/common/utils/logger';
+import { SOCIAL_AUTH_PROVIDERS } from '@/common/constants';
 import * as authRepository from '../repositories/auth.repository';
 import {
   AcceptInviteInput,
   AuthResult,
   AuthUser,
-  InviteStaffInput,
-  InviteStaffResult,
+  FacebookLoginInput,
+  GoogleLoginInput,
+  InviteUserInput,
+  InviteUserResult,
   LoginInput,
+  OAuthCallbackQueryInput,
   RegisterInput,
   RegisterResult,
   ResendOtpInput,
@@ -25,9 +37,9 @@ import {
   ResetPasswordInput,
   TokenPair,
   VerifyOtpInput,
+  VerifyPasswordResetOtpResult,
   VerifyRegistrationOtpInput,
 } from '../auth.types';
-import { VerifyPasswordResetOtpResult } from '../auth.types';
 
 type SelectedRole = {
   id: string;
@@ -69,10 +81,10 @@ async function issueRefreshToken(userId: string): Promise<{ token: string; expir
 /**
  *  Helper function to construct a safe user object for inclusion in API responses, 
  *  stripping out sensitive information and including only necessary details such as verified methods, roles, and permissions.
- * @param user 
- * @param roles 
- * @param permissions 
- * @returns 
+ * @param user The user record containing details such as ID, name, email, phone, and verification status.
+ * @param roles The roles assigned to the user.
+ * @param permissions The permissions granted to the user.
+ * @returns A safe user object containing non-sensitive information and the user's roles and permissions for authorization purposes.
  */
 function buildSafeUser(
   user: {
@@ -104,9 +116,214 @@ function buildSafeUser(
 }
 
 /**
+ *  Finalizes the social login process by checking account status, 
+ *  building a safe user object, issuing tokens, and logging the successful login event.
+ * @param user The user record associated with the social login, containing details such as ID, name, email, phone, and verification status.
+ * @param provider The social authentication provider (e.g., Google, Facebook).
+ * @param context Optional request context containing IP address and user agent information.
+ * @returns An object containing the authenticated user and their access and refresh tokens.
+ */
+async function finalizeSocialLogin(
+  user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string | null;
+    phone: string | null;
+    isActive: boolean;
+    isEmailVerified: boolean;
+    isPhoneVerified: boolean;
+  },
+  provider: typeof SOCIAL_AUTH_PROVIDERS[0 | 1],
+  context?: RequestContext,
+): Promise<AuthResult> {
+  if (!user.isActive) {
+    throw new AppError('Account is deactivated', 403);
+  }
+
+  const roleNames = await authRepository.findUserRoleNames(user.id);
+  const permissions = await authRepository.findUserPermissionKeys(user.id);
+  const safeUser = buildSafeUser(user, roleNames, permissions);
+  const { token: refreshToken } = await issueRefreshToken(user.id);
+  const accessToken = signAccessToken({
+    sub: user.id,
+    email: user.email ?? undefined,
+    phone: user.phone ?? undefined,
+  });
+
+  securityEvent('login_success', {
+    userId: user.id,
+    email: user.email,
+    authProvider: provider,
+    ipAddress: context?.ipAddress,
+    userAgent: context?.userAgent,
+  });
+
+  return { user: safeUser, tokens: { accessToken, refreshToken } };
+}
+
+/**
+ *  Extracts the user's first and last name from the Google ID token payload.
+ * @param payload The payload of the Google ID token, which may contain the user's email, given name, family name, and full name.
+ * @returns An object containing the firstName and lastName extracted from the Google ID token payload
+ */
+function resolveGoogleNames(payload: {
+  email: string;
+  given_name?: string;
+  family_name?: string;
+  name?: string;
+}): { firstName: string; lastName: string } {
+  const givenName = payload.given_name?.trim();
+  const familyName = payload.family_name?.trim();
+
+  if (givenName && familyName) {
+    return { firstName: givenName, lastName: familyName };
+  }
+
+  const fullName = payload.name?.trim();
+  if (fullName) {
+    const [firstName, ...rest] = fullName.split(/\s+/);
+    const lastName = rest.join(' ');
+
+    if (firstName && lastName) {
+      return { firstName, lastName };
+    }
+  }
+
+  // Fallback to using the email's local part as the first name if no other name information is available
+  const localPart = payload.email.split('@')[0] || 'google.user';
+  return {
+    firstName: givenName || localPart,
+    lastName: familyName || 'User',
+  };
+}
+
+/**
+ *  Resolves the redirect URI for the given social authentication provider.
+ * @param provider The social authentication provider (e.g., Google, Facebook).
+ * @param inputRedirectUri Optional redirect URI provided in the request.
+ * @returns The resolved redirect URI.
+ */
+function resolveRedirectUri(
+  provider: typeof SOCIAL_AUTH_PROVIDERS[0 | 1],
+  inputRedirectUri?: string,
+): string {
+  const fallback = provider === SOCIAL_AUTH_PROVIDERS[0] ? env.GOOGLE_REDIRECT_URI : env.FACEBOOK_REDIRECT_URI;
+  const redirectUri = inputRedirectUri ?? fallback;
+  if (!redirectUri) {
+    throw new AppError(
+      `${provider} redirect URI is required for callback flow`,
+      400,
+    );
+  }
+  return redirectUri;
+}
+
+/**
+ *  Creates user with social identity if not exists, or resolves existing user by linked social identity or email. 
+ *  Also handles linking the social identity to the user account if not already linked, 
+ *  and ensures that an email from the social provider is always associated with a user account for consistent identification.
+ * @param provider The social authentication provider (e.g., Google, Facebook).
+ * @param profile The profile information returned by the social authentication provider.
+ * @param context Optional request context containing IP address and user agent information.
+ * @returns The resolved or newly created user associated with the social identity.
+ */
+async function resolveOrProvisionSocialUser(
+  provider: typeof SOCIAL_AUTH_PROVIDERS[0 | 1],
+  profile: {
+    providerUserId: string;
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    name?: string;
+  },
+  context?: RequestContext,
+) {
+  console.log('Resolving or provisioning social user with profile:', profile);
+  const email = profile.email.toLowerCase();
+  console.log('existing linked provider for user:', provider, profile.providerUserId);
+  const linkedIdentity = await authRepository.findSocialIdentityUser(provider, profile.providerUserId);
+
+  let user = linkedIdentity
+    ? await authRepository.findUserById(linkedIdentity.userId)
+    : await authRepository.findUserByEmail(email);
+
+  console.log('user found by social identity:', user);
+  if (!user) {
+    const roles = await authRepository.findRolesByNames(['user']);
+    const [defaultRole] = roles;
+    if (!defaultRole || roles.length !== 1) {
+      throw new AppError('Default role "user" is missing. Run seed before social login.', 500);
+    }
+
+    const { firstName, lastName } = resolveGoogleNames({
+      email,
+      given_name: profile.firstName,
+      family_name: profile.lastName,
+      name: profile.name,
+    });
+
+    const randomPassword = randomBytes(32).toString('hex');
+    const password = await bcrypt.hash(randomPassword, env.BCRYPT_ROUNDS);
+
+    await authRepository.createUserWithRoles(
+      {
+        firstName,
+        lastName,
+        email,
+        password,
+        isVerified: true,
+        isEmailVerified: true,
+        isPhoneVerified: false,
+      },
+      [defaultRole.id],
+    );
+
+    user = await authRepository.findUserByEmail(email);
+    if (!user) {
+      throw new AppError(`Unable to complete ${provider} signup`, 500);
+    }
+
+    securityEvent('register_success', {
+      userId: user.id,
+      email: user.email,
+      authProvider: provider,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+    });
+  }
+
+
+  const existingLinkedProviderForUser = await authRepository.findSocialIdentityByUser(
+    provider,
+    user.id,
+  );
+  console.log('existing linked provider for user:', existingLinkedProviderForUser);
+  if (
+    existingLinkedProviderForUser &&
+    existingLinkedProviderForUser.providerUserId !== profile.providerUserId
+  ) {
+    throw new AppError(`This account is already linked to a different ${provider} identity`, 409);
+  }
+
+  console.log('is account linked?', linkedIdentity);
+
+  if (!linkedIdentity) {
+    await authRepository.linkSocialIdentity({
+      provider,
+      providerUserId: profile.providerUserId,
+      userId: user.id,
+      providerEmail: email,
+    });
+  }
+
+  return user;
+}
+
+/**
  *  Handler for verifying OTPs for both registration and password reset purposes.
- * @param input 
- * @returns 
+ * @param input The input containing either email or phone to identify the user.
+ * @returns An object containing the type of OTP (email or phone) and the target value (email or phone number).
  */
 function resolveIdentifier(input: { email?: string; phone?: string }): {
   type: OtpType;
@@ -314,6 +531,14 @@ export async function login(input: LoginInput, context?: RequestContext): Promis
     throw new AppError('Account is deactivated', 403);
   }
 
+  // check auth identity
+  const authIdentity = await authRepository.findAuthIdentity(user.id);
+
+  // This will allow user continue with google then set password in app
+  if (authIdentity) {
+    throw new AppError(`This account uses ${authIdentity.provider} sign-in. You can continue with ${authIdentity.provider} or set a password to enable email login.`);
+  }
+
   const isLoginMethodVerified = identifier ? user.isEmailVerified : user.isPhoneVerified;
 
   if (!isLoginMethodVerified) {
@@ -359,6 +584,169 @@ export async function login(input: LoginInput, context?: RequestContext): Promis
   return { user: safeUser, tokens: { accessToken, refreshToken } };
 }
 
+/**
+ *  Login with Google by verifying the provided ID token, 
+ *  resolving or provisioning a user account based on the Google profile information, 
+ *  and finalizing the login process by issuing tokens and logging the event.
+ * @param input 
+ * @param context 
+ * @returns An object containing the authentication result, including tokens and user information.
+ */
+export async function loginWithGoogle(
+  input: GoogleLoginInput,
+  context?: RequestContext,
+): Promise<AuthResult> {
+  if (!env.GOOGLE_CLIENT_ID) {
+    throw new AppError('Google login is not configured', 503);
+  }
+
+  const payload = await verifyGoogleIdToken({
+    idToken: input.idToken,
+    audience: env.GOOGLE_CLIENT_ID,
+  });
+
+  if (!payload?.email) {
+    throw new AppError('Google account email is required', 400);
+  }
+
+  if (!payload.email_verified) {
+    throw new AppError('Google email is not verified', 403);
+  }
+
+  if (!payload.sub) {
+    throw new AppError('Google subject is missing from ID token', 401);
+  }
+
+  const user = await resolveOrProvisionSocialUser(
+    SOCIAL_AUTH_PROVIDERS[0],
+    {
+      providerUserId: payload.sub,
+      email: payload.email.toLowerCase(),
+      firstName: payload.given_name,
+      lastName: payload.family_name,
+      name: payload.name,
+    },
+    context,
+  );
+
+  return finalizeSocialLogin(user, SOCIAL_AUTH_PROVIDERS[0], context);
+}
+
+/**
+ *  Login with Facebook by verifying the provided access token,
+ *  resolving or provisioning a user account based on the Facebook profile information, 
+ *  and finalizing the login process by issuing tokens and logging the event.
+ * @param input 
+ * @param context 
+ * @returns An object containing the authentication result, including tokens and user information.
+ */
+export async function loginWithFacebook(
+  input: FacebookLoginInput,
+  context?: RequestContext,
+): Promise<AuthResult> {
+  if (!env.FACEBOOK_APP_ID || !env.FACEBOOK_APP_SECRET) {
+    throw new AppError('Facebook login is not configured', 503);
+  }
+
+  const appAccessToken = `${env.FACEBOOK_APP_ID}|${env.FACEBOOK_APP_SECRET}`;
+  const debugToken = await verifyFacebookAccessToken({
+    userAccessToken: input.accessToken,
+    appAccessToken,
+  });
+
+  if (debugToken.appId !== env.FACEBOOK_APP_ID) {
+    throw new AppError('Facebook token app mismatch', 401);
+  }
+
+  const profile = await fetchFacebookProfile(input.accessToken);
+
+  console.log('Facebook profile fetched:', profile);
+  if (!profile.email) {
+    throw new AppError('Facebook account email is required', 400);
+  }
+
+  if (profile.id && profile.id !== debugToken.userId) {
+    throw new AppError('Facebook token/profile mismatch', 401);
+  }
+
+  console.log('Facebook debug token:', debugToken);
+  console.log('Resolving or provisioning user for Facebook login with profile:', profile);
+  const user = await resolveOrProvisionSocialUser(
+    SOCIAL_AUTH_PROVIDERS[1],
+    {
+      providerUserId: debugToken.userId,
+      email: profile.email,
+      firstName: profile.first_name,
+      lastName: profile.last_name,
+      name: profile.name,
+    },
+    context,
+  );
+
+  return finalizeSocialLogin(user, SOCIAL_AUTH_PROVIDERS[1], context);
+}
+
+/**
+ *  Handles the Google OAuth callback by exchanging the authorization code for an ID token,
+ *  and then logging in the user with the obtained ID token.
+ * @param input 
+ * @param context 
+ * @returns An object containing the authentication result, including tokens and user information.
+ */
+export async function loginWithGoogleCallback(
+  input: OAuthCallbackQueryInput,
+  context?: RequestContext,
+): Promise<AuthResult> {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+    throw new AppError('Google callback login is not configured', 503);
+  }
+
+  const redirectUri = resolveRedirectUri(SOCIAL_AUTH_PROVIDERS[0], input.redirectUri);
+  const { idToken } = await exchangeGoogleAuthorizationCode({
+    code: input.code,
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+    redirectUri,
+  });
+
+  return loginWithGoogle({ idToken }, context);
+}
+
+/**
+ *  Handles the Facebook OAuth callback by exchanging the authorization code for an access token,
+ *  and then logging in the user with the obtained access token.
+ * @param input 
+ * @param context 
+ * @returns An object containing the authentication result, including tokens and user information.
+ */
+export async function loginWithFacebookCallback(
+  input: OAuthCallbackQueryInput,
+  context?: RequestContext,
+): Promise<AuthResult> {
+  if (!env.FACEBOOK_APP_ID || !env.FACEBOOK_APP_SECRET) {
+    throw new AppError('Facebook callback login is not configured', 503);
+  }
+
+  const redirectUri = resolveRedirectUri(SOCIAL_AUTH_PROVIDERS[1], input.redirectUri);
+  const { accessToken } = await exchangeFacebookAuthorizationCode({
+    code: input.code,
+    appId: env.FACEBOOK_APP_ID,
+    appSecret: env.FACEBOOK_APP_SECRET,
+    redirectUri,
+  });
+
+  return loginWithFacebook({ accessToken }, context);
+}
+
+/**
+ *  Initiates the forgot password flow by generating and storing an OTP code for the user identified by email or phone, 
+ *  and returning the OTP code and channel for sending to the user.
+ *  The OTP code is generated securely and stored in a hashed form in the database, 
+ *  with an expiry time set according to the environment configuration.
+ * @param input 
+ * @param context 
+ * @returns An object containing the channel ('email' or 'phone') and the raw OTP code that can be sent to the user for password reset verification.
+ */
 export async function forgotPassword(
   input: RequestOtpInput,
   context?: RequestContext,
@@ -381,7 +769,7 @@ export async function forgotPassword(
 export async function inviteUser(
   input: InviteUserInput,
   invitedByUserId: string,
-): Promise<InviteStaffResult> {
+): Promise<InviteUserResult> {
   const email = input.email.toLowerCase();
   const channel = input.channel ?? 'email';
   if (channel === 'whatsapp' && !input.phone) {

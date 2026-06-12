@@ -9,3 +9,5 @@ export const MAX_OTP_REQUESTS_PER_WINDOW = 3; // Maximum OTP requests allowed wi
 
 export const PASSWORD_RESET_TOKEN_EXPIRY_MINUTES = 15; // Password reset tokens are valid for 15 minutes
 export const INVITE_TOKEN_EXPIRY_HOURS = 48; // Invite tokens are valid for 48 hours
+
+export const SOCIAL_AUTH_PROVIDERS = ['google', 'facebook'] as const; 

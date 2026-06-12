@@ -59,6 +59,19 @@ export const loginSchema = emailOrPhoneSchema.extend({
   password: z.string().min(1),
 });
 
+export const googleLoginSchema = z.object({
+  idToken: z.string().min(1, 'Google ID token is required'),
+});
+
+export const facebookLoginSchema = z.object({
+  accessToken: z.string().min(1, 'Facebook access token is required'),
+});
+
+export const oauthCallbackQuerySchema = z.object({
+  code: z.string().min(1, 'Authorization code is required'),
+  redirectUri: z.string().url().optional(),
+});
+
 export const resetPasswordSchema = z.object({
   resetToken: z.string().min(1, 'Reset token is required'),
   newPassword: z

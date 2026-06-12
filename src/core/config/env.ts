@@ -14,8 +14,19 @@ const envSchema = z.object({
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
   BCRYPT_ROUNDS: z.coerce.number().min(10).max(14).default(12),
   OTP_EXPIRES_MINUTES: z.coerce.number().min(1).max(30).default(10),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  FACEBOOK_APP_ID: z.string().optional(),
+  FACEBOOK_APP_SECRET: z.string().optional(),
+  FACEBOOK_REDIRECT_URI: z.string().url().optional(),
   GMAIL_USER: z.string().email().optional(),
   GMAIL_APP_PASSWORD: z.string().optional(),
+  SUPER_ADMIN_FIRST_NAME: z.string(),
+  SUPER_ADMIN_LAST_NAME: z.string().optional(),
+  SUPER_ADMIN_EMAIL: z.string().email(),
+  SUPER_ADMIN_PHONE: z.string().regex(/^\+?[1-9]\d{7,14}$/),
+  SUPER_ADMIN_PASSWORD: z.string().min(6),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -11,6 +11,16 @@ export interface LoginInput {
   phone?: string;
   password: string;
 }
+export interface GoogleLoginInput {
+  idToken: string;
+}
+export interface FacebookLoginInput {
+  accessToken: string;
+}
+export interface OAuthCallbackQueryInput {
+  code: string;
+  redirectUri?: string;
+}
 export interface RequestOtpInput {
   email?: string;
   phone?: string;
@@ -46,6 +56,7 @@ export interface AcceptInviteInput {
 
 export interface InviteUserResult {
   inviteId: string;
+  acceptUrl: string;
   email: string;
   phone?: string;
   channel: InviteChannel;
