@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { AppError } from '@/core/errors/AppError';
-import * as authService from '../services/auth.service';
-import * as authRepository from '../repositories/auth.repository';
+import * as authService from '@/modules/auth/services/auth.service';
+import * as authRepository from '@/modules/auth/repositories/auth.repository';
+import * as userRepository from '@/modules/users/repositories/users.repository';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '@/core/auth/jwt';
 import * as loginProtection from '@/core/auth/login-protection';
 import * as mailService from '@/core/mail/mail.service';
@@ -10,7 +11,8 @@ import { logger } from '@/common/utils/logger';
 import { env } from '@/core/config/env';
 
 // Mock at the repository boundary — service tests must not know Prisma internals
-jest.mock('../repositories/auth.repository');
+jest.mock('@/modules/auth/repositories/auth.repository');
+jest.mock('@/modules/users/repositories/users.repository');
 // Mock JWT utility functions directly — avoids reimplementing crypto in tests
 jest.mock('@/core/auth/jwt');
 jest.mock('bcryptjs');
@@ -27,7 +29,8 @@ jest.mock('@/common/utils/logger', () => ({
   },
 }));
 
-const mockRepo = authRepository as jest.Mocked<typeof authRepository>;
+const mockAuthRepo = authRepository as jest.Mocked<typeof authRepository>;
+const mockUserRepo = userRepository as jest.Mocked<typeof userRepository>;
 const mockSignAccess = signAccessToken as jest.MockedFunction<typeof signAccessToken>;
 const mockSignRefresh = signRefreshToken as jest.MockedFunction<typeof signRefreshToken>;
 const mockVerifyRefresh = verifyRefreshToken as jest.MockedFunction<typeof verifyRefreshToken>;
@@ -72,7 +75,7 @@ const tokenRecord = {
 function mockIssueRefreshToken(refreshTokenValue = 'refresh-token') {
   mockSignRefresh.mockReturnValueOnce(refreshTokenValue);
   mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-1', exp: futureExp });
-  mockRepo.storeRefreshToken.mockResolvedValueOnce(undefined as never);
+  mockAuthRepo.storeRefreshToken.mockResolvedValueOnce(undefined as never);
 }
 
 beforeEach(() => {
@@ -93,13 +96,13 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 describe('authService.forgotPassword', () => {
   it('stores a password reset OTP in the DB', async () => {
-    mockRepo.findUserByPhone.mockResolvedValueOnce({ ...sampleUser, isVerified: true } as never);
+    mockUserRepo.findUserByPhone.mockResolvedValueOnce({ ...sampleUser, isVerified: true } as never);
 
     const result = await authService.forgotPassword({
       phone: '+2348012345678',
     });
 
-    expect(mockRepo.storeOtpCode).toHaveBeenCalledWith(
+    expect(mockAuthRepo.storeOtpCode).toHaveBeenCalledWith(
       '+2348012345678',
       'PHONE',
       'PASSWORD_RESET',
@@ -112,7 +115,7 @@ describe('authService.forgotPassword', () => {
   });
 
   it('throws 404 when account is not found', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(null);
 
     await expect(authService.forgotPassword({ email: 'unknown@example.com' })).rejects.toThrow(
       new AppError('Account not found', 404),
@@ -125,14 +128,14 @@ describe('authService.forgotPassword', () => {
 // ---------------------------------------------------------------------------
 describe('authService.resendOtp', () => {
   it('throws 429 when a pending OTP is still within the resend cooldown', async () => {
-    mockRepo.resendOtpCode.mockRejectedValueOnce(
+    mockAuthRepo.resendOtpCode.mockRejectedValueOnce(
       new AppError('Please wait 45 seconds before requesting another OTP', 429),
     );
 
     await expect(authService.resendOtp({ email: 'sam@gmail.com' })).rejects.toThrow(
       new AppError('Please wait 45 seconds before requesting another OTP', 429),
     );
-    expect(mockRepo.resendOtpCode).toHaveBeenCalledWith(
+    expect(mockAuthRepo.resendOtpCode).toHaveBeenCalledWith(
       'sam@gmail.com',
       'EMAIL',
       expect.any(String),
@@ -144,11 +147,11 @@ describe('authService.resendOtp', () => {
 
   it('rotates the OTP after the cooldown even when the previous OTP has not expired yet', async () => {
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('hashed_otp');
-    mockRepo.resendOtpCode.mockResolvedValueOnce('REGISTRATION' as never);
+    mockAuthRepo.resendOtpCode.mockResolvedValueOnce('REGISTRATION' as never);
 
     const result = await authService.resendOtp({ email: 'sam@gmail.com' });
 
-    expect(mockRepo.resendOtpCode).toHaveBeenCalledWith(
+    expect(mockAuthRepo.resendOtpCode).toHaveBeenCalledWith(
       'sam@gmail.com',
       'EMAIL',
       'hashed_otp',
@@ -161,11 +164,11 @@ describe('authService.resendOtp', () => {
   });
 
   it('forwards the explicit purpose to the repository helper', async () => {
-    mockRepo.resendOtpCode.mockResolvedValueOnce('PASSWORD_RESET' as never);
+    mockAuthRepo.resendOtpCode.mockResolvedValueOnce('PASSWORD_RESET' as never);
 
     await authService.resendOtp({ email: 'sam@gmail.com', purpose: 'PASSWORD_RESET' });
 
-    expect(mockRepo.resendOtpCode).toHaveBeenCalledWith(
+    expect(mockAuthRepo.resendOtpCode).toHaveBeenCalledWith(
       'sam@gmail.com',
       'EMAIL',
       expect.any(String),
@@ -181,7 +184,7 @@ describe('authService.resendOtp', () => {
 // ---------------------------------------------------------------------------
 describe('authService.register', () => {
   it('throws 409 when email already exists', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
 
     await expect(
       authService.register({
@@ -195,11 +198,11 @@ describe('authService.register', () => {
   });
 
   it('hashes the password before storing', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
-    mockRepo.findRolesByNames.mockResolvedValueOnce([sampleRole] as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockUserRepo.findRolesByNames.mockResolvedValueOnce([sampleRole] as never);
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('hashed_pw');
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('hashed_otp');
-    mockRepo.createUserWithRolesAndOtp.mockResolvedValueOnce(sampleUser as never);
+    mockAuthRepo.createUserWithRolesAndOtp.mockResolvedValueOnce(sampleUser as never);
 
     await authService.register({
       firstName: 'Sam',
@@ -214,11 +217,11 @@ describe('authService.register', () => {
   });
 
   it('returns user, requiresOtpVerification and otpCode on success', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
-    mockRepo.findRolesByNames.mockResolvedValueOnce([sampleRole] as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockUserRepo.findRolesByNames.mockResolvedValueOnce([sampleRole] as never);
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('hashed_pw');
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('hashed_otp');
-    mockRepo.createUserWithRolesAndOtp.mockResolvedValueOnce(sampleUser as never);
+    mockAuthRepo.createUserWithRolesAndOtp.mockResolvedValueOnce(sampleUser as never);
 
     const result = await authService.register({
       firstName: 'Sam',
@@ -235,7 +238,7 @@ describe('authService.register', () => {
     expect(result.otpChannel).toBe('email');
     expect(result.otpCode).toHaveLength(6);
     expect(result.user).not.toHaveProperty('password');
-    expect(mockRepo.createUserWithRolesAndOtp).toHaveBeenCalledWith(
+    expect(mockAuthRepo.createUserWithRolesAndOtp).toHaveBeenCalledWith(
       {
         firstName: 'Sam',
         lastName: 'John',
@@ -256,8 +259,8 @@ describe('authService.register', () => {
   });
 
   it('throws 404 when a selected role does not exist', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
-    mockRepo.findRolesByNames.mockResolvedValueOnce([] as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockUserRepo.findRolesByNames.mockResolvedValueOnce([] as never);
 
     await expect(
       authService.register({
@@ -276,15 +279,15 @@ describe('authService.register', () => {
 // ---------------------------------------------------------------------------
 describe('authService.verifyRegistrationOtp', () => {
   it('verifies user and returns token pair for valid OTP', async () => {
-    mockRepo.consumeOtpCode.mockResolvedValueOnce(true);
-    mockRepo.findUserByEmail.mockResolvedValueOnce({
+    mockAuthRepo.consumeOtpCode.mockResolvedValueOnce(true);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce({
       ...dbUserWithPassword,
       isVerified: false,
       isEmailVerified: false,
     } as never);
-    mockRepo.markUserAsVerified.mockResolvedValueOnce(undefined as never);
-    mockRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
-    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
+    mockUserRepo.markUserAsVerified.mockResolvedValueOnce(undefined as never);
+    mockUserRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
+    mockUserRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
@@ -293,14 +296,14 @@ describe('authService.verifyRegistrationOtp', () => {
       otpCode: '123456',
     });
 
-    expect(mockRepo.markUserAsVerified).toHaveBeenCalledWith('user-1', 'EMAIL');
+    expect(mockUserRepo.markUserAsVerified).toHaveBeenCalledWith('user-1', 'EMAIL');
     expect(result.tokens.accessToken).toBe('access');
     expect(result.tokens.refreshToken).toBe('refresh');
     expect(result.user.verifiedMethods).toEqual(['EMAIL']);
   });
 
   it('throws 401 for invalid OTP', async () => {
-    mockRepo.consumeOtpCode.mockResolvedValueOnce(false);
+    mockAuthRepo.consumeOtpCode.mockResolvedValueOnce(false);
 
     await expect(
       authService.verifyRegistrationOtp({
@@ -311,70 +314,6 @@ describe('authService.verifyRegistrationOtp', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// inviteUser
-// ---------------------------------------------------------------------------
-describe('authService.inviteUser', () => {
-  it('creates invite and returns the accept URL for email channel', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
-    mockRepo.findRolesByNames.mockResolvedValueOnce([
-      { id: 'role-1', name: 'staff' },
-    ] as never);
-    mockRepo.findUserById.mockResolvedValueOnce(sampleUser as never);
-    mockRepo.createUserInvite.mockResolvedValueOnce({
-      inviteId: 'invite-1',
-      rawToken: 'raw-token',
-      expiresAt: new Date(Date.now() + 60_000),
-    } as never);
-    mockMailService.sendEmail.mockResolvedValueOnce(undefined as never);
-
-    const result = await authService.inviteUser(
-      {
-        email: 'new.staff@example.com',
-        roles: ['staff'],
-        channel: 'email',
-      },
-      'user-1',
-    );
-
-    expect(mockRepo.createUserInvite).toHaveBeenCalledWith({
-      email: 'new.staff@example.com',
-      createdBy: 'user-1',
-      roleIds: ['role-1'],
-    });
-    expect(mockMailService.sendEmail).not.toHaveBeenCalled();
-    expect(result.acceptUrl).toContain('accept-invite?token=');
-    expect(result.inviteId).toBe('invite-1');
-    expect(result.channel).toBe('email');
-  });
-
-  it('returns invite metadata for whatsapp channel', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
-    mockRepo.findRolesByNames.mockResolvedValueOnce([
-      { id: 'role-1', name: 'staff' },
-    ] as never);
-    mockRepo.findUserById.mockResolvedValueOnce(sampleUser as never);
-    mockRepo.createUserInvite.mockResolvedValueOnce({
-      inviteId: 'invite-2',
-      rawToken: 'raw-token-2',
-      expiresAt: new Date(Date.now() + 60_000),
-    } as never);
-
-    const result = await authService.inviteUser(
-      {
-        email: 'new.staff@example.com',
-        phone: '+2348012345678',
-        roles: ['staff'],
-        channel: 'whatsapp',
-      },
-      'user-1',
-    );
-
-    expect(mockLogger.info).not.toHaveBeenCalled();
-    expect(result.acceptUrl).toContain('accept-invite?token=');
-    expect(result.channel).toBe('whatsapp');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // loginWithGoogle
@@ -389,18 +328,18 @@ describe('authService.loginWithGoogle', () => {
       family_name: 'John',
     });
 
-    mockRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
-    mockRepo.findSocialIdentityByUser.mockResolvedValueOnce(null as never);
-    mockRepo.linkSocialIdentity.mockResolvedValueOnce(undefined as never);
-    mockRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
-    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
+    mockAuthRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockAuthRepo.findSocialIdentityByUser.mockResolvedValueOnce(null as never);
+    mockAuthRepo.linkSocialIdentity.mockResolvedValueOnce(undefined as never);
+    mockUserRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
+    mockUserRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
     const result = await authService.loginWithGoogle({ idToken: 'google-id-token' });
 
-    expect(mockRepo.linkSocialIdentity).toHaveBeenCalledWith({
+    expect(mockAuthRepo.linkSocialIdentity).toHaveBeenCalledWith({
       provider: 'google',
       providerUserId: 'google-sub-123',
       userId: 'user-1',
@@ -417,9 +356,9 @@ describe('authService.loginWithGoogle', () => {
       email_verified: true,
     });
 
-    mockRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
-    mockRepo.findSocialIdentityByUser.mockResolvedValueOnce({
+    mockAuthRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockAuthRepo.findSocialIdentityByUser.mockResolvedValueOnce({
       userId: 'user-1',
       providerUserId: 'google-sub-old',
       providerEmail: 'sam@gmail.com',
@@ -429,7 +368,7 @@ describe('authService.loginWithGoogle', () => {
       authService.loginWithGoogle({ idToken: 'google-id-token' }),
     ).rejects.toThrow(new AppError('This account is already linked to a different google identity', 409));
 
-    expect(mockRepo.linkSocialIdentity).not.toHaveBeenCalled();
+    expect(mockAuthRepo.linkSocialIdentity).not.toHaveBeenCalled();
   });
 });
 
@@ -451,12 +390,12 @@ describe('authService.loginWithFacebook', () => {
       name: 'Sam John',
     });
 
-    mockRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
-    mockRepo.findSocialIdentityByUser.mockResolvedValueOnce(null as never);
-    mockRepo.linkSocialIdentity.mockResolvedValueOnce(undefined as never);
-    mockRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
-    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
+    mockAuthRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockAuthRepo.findSocialIdentityByUser.mockResolvedValueOnce(null as never);
+    mockAuthRepo.linkSocialIdentity.mockResolvedValueOnce(undefined as never);
+    mockUserRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
+    mockUserRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
@@ -467,7 +406,7 @@ describe('authService.loginWithFacebook', () => {
       appAccessToken: 'facebook-app-id|facebook-app-secret',
     });
     expect(mockSocialAuthProvider.fetchFacebookProfile).toHaveBeenCalledWith('facebook-user-access-token');
-    expect(mockRepo.linkSocialIdentity).toHaveBeenCalledWith({
+    expect(mockAuthRepo.linkSocialIdentity).toHaveBeenCalledWith({
       provider: 'facebook',
       providerUserId: 'fb-user-123',
       userId: 'user-1',
@@ -506,12 +445,12 @@ describe('authService.loginWithGoogleCallback', () => {
       family_name: 'John',
     });
 
-    mockRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
-    mockRepo.findSocialIdentityByUser.mockResolvedValueOnce(null as never);
-    mockRepo.linkSocialIdentity.mockResolvedValueOnce(undefined as never);
-    mockRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
-    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
+    mockAuthRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockAuthRepo.findSocialIdentityByUser.mockResolvedValueOnce(null as never);
+    mockAuthRepo.linkSocialIdentity.mockResolvedValueOnce(undefined as never);
+    mockUserRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
+    mockUserRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
@@ -551,12 +490,12 @@ describe('authService.loginWithFacebookCallback', () => {
       last_name: 'John',
     });
 
-    mockRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
-    mockRepo.findSocialIdentityByUser.mockResolvedValueOnce(null as never);
-    mockRepo.linkSocialIdentity.mockResolvedValueOnce(undefined as never);
-    mockRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
-    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
+    mockAuthRepo.findSocialIdentityUser.mockResolvedValueOnce(null as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockAuthRepo.findSocialIdentityByUser.mockResolvedValueOnce(null as never);
+    mockAuthRepo.linkSocialIdentity.mockResolvedValueOnce(undefined as never);
+    mockUserRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
+    mockUserRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
@@ -581,15 +520,15 @@ describe('authService.loginWithFacebookCallback', () => {
 // ---------------------------------------------------------------------------
 describe('authService.acceptInvite', () => {
   it('accepts invite, creates user with roles, and returns auth tokens', async () => {
-    mockRepo.consumeUserInvite.mockResolvedValueOnce({
+    mockAuthRepo.consumeUserInvite.mockResolvedValueOnce({
       id: 'invite-1',
       email: 'invited@example.com',
       createdBy: 'user-1',
       roleIds: ['role-1'],
     } as never);
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(null);
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('hashed_pw');
-    mockRepo.createInvitedUserWithRoles.mockResolvedValueOnce({
+    mockUserRepo.createInvitedUserWithRoles.mockResolvedValueOnce({
       id: 'user-2',
       firstName: 'New',
       lastName: 'Staff',
@@ -598,11 +537,11 @@ describe('authService.acceptInvite', () => {
       isEmailVerified: true,
       isPhoneVerified: false,
     } as never);
-    mockRepo.findUserRoleNames.mockResolvedValueOnce(['staff']);
-    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
+    mockUserRepo.findUserRoleNames.mockResolvedValueOnce(['staff']);
+    mockUserRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
     mockSignRefresh.mockReturnValueOnce('refresh-token');
     mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-2', exp: futureExp });
-    mockRepo.storeRefreshToken.mockResolvedValueOnce(undefined as never);
+    mockAuthRepo.storeRefreshToken.mockResolvedValueOnce(undefined as never);
     mockSignAccess.mockReturnValueOnce('access-token');
 
     const result = await authService.acceptInvite({
@@ -612,7 +551,7 @@ describe('authService.acceptInvite', () => {
       password: 'Password1',
     });
 
-    expect(mockRepo.createInvitedUserWithRoles).toHaveBeenCalledWith({
+    expect(mockUserRepo.createInvitedUserWithRoles).toHaveBeenCalledWith({
       firstName: 'New',
       lastName: 'Staff',
       email: 'invited@example.com',
@@ -625,7 +564,7 @@ describe('authService.acceptInvite', () => {
   });
 
   it('throws 401 when invite token is invalid or already used', async () => {
-    mockRepo.consumeUserInvite.mockResolvedValueOnce(null as never);
+    mockAuthRepo.consumeUserInvite.mockResolvedValueOnce(null as never);
 
     await expect(
       authService.acceptInvite({
@@ -643,23 +582,23 @@ describe('authService.acceptInvite', () => {
 // ---------------------------------------------------------------------------
 describe('authService.resetPassword', () => {
   it('resets password and revokes all sessions when reset token is valid', async () => {
-    mockRepo.consumePasswordResetToken.mockResolvedValueOnce('user-1' as never);
-    mockRepo.findUserById.mockResolvedValueOnce(sampleUser as never);
+    mockAuthRepo.consumePasswordResetToken.mockResolvedValueOnce('user-1' as never);
+    mockUserRepo.findUserById.mockResolvedValueOnce(sampleUser as never);
     (mockBcrypt.hash as jest.Mock).mockResolvedValueOnce('new_hashed_pw');
-    mockRepo.updateUserPassword.mockResolvedValueOnce(undefined as never);
-    mockRepo.revokeAllRefreshTokens.mockResolvedValueOnce(undefined as never);
+    mockUserRepo.updateUserPassword.mockResolvedValueOnce(undefined as never);
+    mockAuthRepo.revokeAllRefreshTokens.mockResolvedValueOnce(undefined as never);
 
     await authService.resetPassword({
       resetToken: 'valid-reset-token',
       newPassword: 'NewPassword1',
     });
 
-    expect(mockRepo.updateUserPassword).toHaveBeenCalledWith('user-1', 'new_hashed_pw');
-    expect(mockRepo.revokeAllRefreshTokens).toHaveBeenCalledWith('user-1');
+    expect(mockUserRepo.updateUserPassword).toHaveBeenCalledWith('user-1', 'new_hashed_pw');
+    expect(mockAuthRepo.revokeAllRefreshTokens).toHaveBeenCalledWith('user-1');
   });
 
   it('throws 401 when reset token is invalid or expired', async () => {
-    mockRepo.consumePasswordResetToken.mockResolvedValueOnce(null as never);
+    mockAuthRepo.consumePasswordResetToken.mockResolvedValueOnce(null as never);
 
     await expect(
       authService.resetPassword({
@@ -670,8 +609,8 @@ describe('authService.resetPassword', () => {
   });
 
   it('throws 404 when account is not found after token check', async () => {
-    mockRepo.consumePasswordResetToken.mockResolvedValueOnce('user-1' as never);
-    mockRepo.findUserById.mockResolvedValueOnce(null as never);
+    mockAuthRepo.consumePasswordResetToken.mockResolvedValueOnce('user-1' as never);
+    mockUserRepo.findUserById.mockResolvedValueOnce(null as never);
 
     await expect(
       authService.resetPassword({
@@ -687,7 +626,7 @@ describe('authService.resetPassword', () => {
 // ---------------------------------------------------------------------------
 describe('authService.login', () => {
   it('throws 401 when user not found', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(null);
 
     await expect(
       authService.login({ email: 'nobody@example.com', password: 'pass' }),
@@ -695,7 +634,7 @@ describe('authService.login', () => {
   });
 
   it('throws 403 when account is deactivated', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce({
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce({
       ...dbUserWithPassword,
       isActive: false,
     } as never);
@@ -706,7 +645,7 @@ describe('authService.login', () => {
   });
 
   it('throws 403 when account is not verified', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce({
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce({
       ...dbUserWithPassword,
       isEmailVerified: false,
     } as never);
@@ -719,7 +658,7 @@ describe('authService.login', () => {
   });
 
   it('throws 401 for wrong password', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
     (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
 
     await expect(
@@ -728,9 +667,9 @@ describe('authService.login', () => {
   });
 
   it('returns user (without password) and tokens on valid credentials', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
-    mockRepo.findUserRoleNames.mockResolvedValueOnce(['super_admin']);
-    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read', 'roles.assign']);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockUserRepo.findUserRoleNames.mockResolvedValueOnce(['super_admin']);
+    mockUserRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read', 'roles.assign']);
     (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
@@ -746,16 +685,16 @@ describe('authService.login', () => {
   });
 
   it('stores a new refresh token in the DB on successful login', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
-    mockRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
-    mockRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockUserRepo.findUserRoleNames.mockResolvedValueOnce(['user']);
+    mockUserRepo.findUserPermissionKeys.mockResolvedValueOnce(['users.read']);
     (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
 
     await authService.login({ email: 'sam@gmail.com', password: 'Password1' });
 
-    expect(mockRepo.storeRefreshToken).toHaveBeenCalledWith('user-1', 'refresh', expect.any(Date));
+    expect(mockAuthRepo.storeRefreshToken).toHaveBeenCalledWith('user-1', 'refresh', expect.any(Date));
   });
 
   it('throws 429 when the account is locked out', async () => {
@@ -765,11 +704,11 @@ describe('authService.login', () => {
       authService.login({ email: 'sam@gmail.com', password: 'Password1' }),
     ).rejects.toThrow(new AppError('Too many failed login attempts. Please try again later.', 429));
 
-    expect(mockRepo.findUserByEmail).not.toHaveBeenCalled();
+    expect(mockUserRepo.findUserByEmail).not.toHaveBeenCalled();
   });
 
   it('records a failed attempt when credentials are wrong', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
     (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
 
     await expect(
@@ -780,7 +719,7 @@ describe('authService.login', () => {
   });
 
   it('records a failed attempt when user is not found', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(null);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(null);
 
     await expect(
       authService.login({ email: 'nobody@example.com', password: 'pass' }),
@@ -790,7 +729,7 @@ describe('authService.login', () => {
   });
 
   it('clears failed attempts on successful login', async () => {
-    mockRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
+    mockUserRepo.findUserByEmail.mockResolvedValueOnce(dbUserWithPassword as never);
     (mockBcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
     mockIssueRefreshToken('refresh');
     mockSignAccess.mockReturnValueOnce('access');
@@ -828,7 +767,7 @@ describe('authService.refreshTokens', () => {
   it('throws 401 when the token has already been consumed (replay prevention)', async () => {
     // JWT is cryptographically valid but was already used — consumeRefreshToken returns null
     mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-1', exp: futureExp });
-    mockRepo.consumeRefreshToken.mockResolvedValueOnce(null);
+    mockAuthRepo.consumeRefreshToken.mockResolvedValueOnce(null);
 
     await expect(authService.refreshTokens('already-used-token')).rejects.toMatchObject({
       statusCode: 401,
@@ -838,8 +777,8 @@ describe('authService.refreshTokens', () => {
   it('rejects a second attempt with the same token (race condition / token reuse)', async () => {
     // First request: succeeds and rotates the token
     mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-1', exp: futureExp });
-    mockRepo.consumeRefreshToken.mockResolvedValueOnce(tokenRecord);
-    mockRepo.findUserById.mockResolvedValueOnce({ ...sampleUser, isActive: true } as never);
+    mockAuthRepo.consumeRefreshToken.mockResolvedValueOnce(tokenRecord);
+    mockUserRepo.findUserById.mockResolvedValueOnce({ ...sampleUser, isActive: true } as never);
     mockIssueRefreshToken('new-refresh');
     mockSignAccess.mockReturnValueOnce('new-access');
 
@@ -847,7 +786,7 @@ describe('authService.refreshTokens', () => {
 
     // Second request with the same old token — DB record is gone
     mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-1', exp: futureExp });
-    mockRepo.consumeRefreshToken.mockResolvedValueOnce(null);
+    mockAuthRepo.consumeRefreshToken.mockResolvedValueOnce(null);
 
     await expect(authService.refreshTokens('old-token')).rejects.toMatchObject({
       statusCode: 401,
@@ -856,8 +795,8 @@ describe('authService.refreshTokens', () => {
 
   it('throws 401 when user no longer exists', async () => {
     mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-1', exp: futureExp });
-    mockRepo.consumeRefreshToken.mockResolvedValueOnce(tokenRecord);
-    mockRepo.findUserById.mockResolvedValueOnce(null);
+    mockAuthRepo.consumeRefreshToken.mockResolvedValueOnce(tokenRecord);
+    mockUserRepo.findUserById.mockResolvedValueOnce(null);
 
     await expect(authService.refreshTokens('token')).rejects.toThrow(
       new AppError('User not found', 401),
@@ -866,8 +805,8 @@ describe('authService.refreshTokens', () => {
 
   it('throws 403 when account is deactivated', async () => {
     mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-1', exp: futureExp });
-    mockRepo.consumeRefreshToken.mockResolvedValueOnce(tokenRecord);
-    mockRepo.findUserById.mockResolvedValueOnce({ ...sampleUser, isActive: false } as never);
+    mockAuthRepo.consumeRefreshToken.mockResolvedValueOnce(tokenRecord);
+    mockUserRepo.findUserById.mockResolvedValueOnce({ ...sampleUser, isActive: false } as never);
 
     await expect(authService.refreshTokens('token')).rejects.toThrow(
       new AppError('Account is deactivated', 403),
@@ -876,8 +815,8 @@ describe('authService.refreshTokens', () => {
 
   it('issues a rotated token pair on success', async () => {
     mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-1', exp: futureExp });
-    mockRepo.consumeRefreshToken.mockResolvedValueOnce(tokenRecord);
-    mockRepo.findUserById.mockResolvedValueOnce({ ...sampleUser, isActive: true } as never);
+    mockAuthRepo.consumeRefreshToken.mockResolvedValueOnce(tokenRecord);
+    mockUserRepo.findUserById.mockResolvedValueOnce({ ...sampleUser, isActive: true } as never);
     mockIssueRefreshToken('new-refresh');
     mockSignAccess.mockReturnValueOnce('new-access');
 
@@ -886,7 +825,7 @@ describe('authService.refreshTokens', () => {
     expect(tokens.accessToken).toBe('new-access');
     expect(tokens.refreshToken).toBe('new-refresh');
     // Old token was consumed; a new one was stored
-    expect(mockRepo.storeRefreshToken).toHaveBeenCalledWith(
+    expect(mockAuthRepo.storeRefreshToken).toHaveBeenCalledWith(
       'user-1',
       'new-refresh',
       expect.any(Date),
@@ -900,22 +839,22 @@ describe('authService.refreshTokens', () => {
 describe('authService.logout', () => {
   it('revokes the given refresh token', async () => {
     mockVerifyRefresh.mockReturnValueOnce({ sub: 'user-1', exp: futureExp });
-    mockRepo.revokeRefreshToken.mockResolvedValueOnce(undefined as never);
+    mockAuthRepo.revokeRefreshToken.mockResolvedValueOnce(undefined as never);
 
     await authService.logout('valid-refresh');
 
-    expect(mockRepo.revokeRefreshToken).toHaveBeenCalledWith('valid-refresh');
+    expect(mockAuthRepo.revokeRefreshToken).toHaveBeenCalledWith('valid-refresh');
   });
 
   it('still revokes an expired token so the client is cleaned up', async () => {
     mockVerifyRefresh.mockImplementationOnce(() => {
       throw new Error('jwt expired');
     });
-    mockRepo.revokeRefreshToken.mockResolvedValueOnce(undefined as never);
+    mockAuthRepo.revokeRefreshToken.mockResolvedValueOnce(undefined as never);
 
     await authService.logout('expired-refresh');
 
-    expect(mockRepo.revokeRefreshToken).toHaveBeenCalledWith('expired-refresh');
+    expect(mockAuthRepo.revokeRefreshToken).toHaveBeenCalledWith('expired-refresh');
   });
 
   it('throws 400 for a completely malformed token', async () => {

@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: node_starter
+      POSTGRES_DB: node_starter_db
     ports:
       - "5433:5432"
     volumes:
@@ -22,7 +22,7 @@ services:
       - .env
     environment:
       NODE_ENV: development
-      DATABASE_URL: postgresql://postgres:password@db:5432/node_starter
+      DATABASE_URL: postgresql://postgres:password@db:5432/node_starter_db
     ports:
       - "4000:3000"
     volumes:

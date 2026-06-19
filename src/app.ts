@@ -11,7 +11,7 @@ import { apiLimiter, authLimiter } from '@/core/middleware/rate-limit';
 import { sendSuccess } from '@/common/helpers/response';
 
 import authRoutes from '@/modules/auth/routes/auth.routes';
-import adminRoutes from '@/modules/auth/routes/admin.routes';
+import adminRoutes from '@/modules/admin/routes/admin.routes';
 import usersRoutes from '@/modules/users/routes/users.routes';
 import { rolesRouter, permissionsRouter } from '@/modules/roles/routes/roles.routes';
 

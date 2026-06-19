@@ -19,14 +19,13 @@ import { userInviteTemplate } from '@/core/mail/templates/user-invite.template';
 import { logger } from '@/common/utils/logger';
 import { SOCIAL_AUTH_PROVIDERS } from '@/common/constants';
 import * as authRepository from '../repositories/auth.repository';
+import * as userRepository from '../../users/repositories/users.repository';
 import {
   AcceptInviteInput,
   AuthResult,
   AuthUser,
   FacebookLoginInput,
   GoogleLoginInput,
-  InviteUserInput,
-  InviteUserResult,
   LoginInput,
   OAuthCallbackQueryInput,
   RegisterInput,
@@ -141,8 +140,8 @@ async function finalizeSocialLogin(
     throw new AppError('Account is deactivated', 403);
   }
 
-  const roleNames = await authRepository.findUserRoleNames(user.id);
-  const permissions = await authRepository.findUserPermissionKeys(user.id);
+  const roleNames = await userRepository.findUserRoleNames(user.id);
+  const permissions = await userRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roleNames, permissions);
   const { token: refreshToken } = await issueRefreshToken(user.id);
   const accessToken = signAccessToken({
@@ -245,12 +244,12 @@ async function resolveOrProvisionSocialUser(
   const linkedIdentity = await authRepository.findSocialIdentityUser(provider, profile.providerUserId);
 
   let user = linkedIdentity
-    ? await authRepository.findUserById(linkedIdentity.userId)
-    : await authRepository.findUserByEmail(email);
+    ? await userRepository.findUserById(linkedIdentity.userId)
+    : await userRepository.findUserByEmail(email);
 
   console.log('user found by social identity:', user);
   if (!user) {
-    const roles = await authRepository.findRolesByNames(['user']);
+    const roles = await userRepository.findRolesByNames(['user']);
     const [defaultRole] = roles;
     if (!defaultRole || roles.length !== 1) {
       throw new AppError('Default role "user" is missing. Run seed before social login.', 500);
@@ -266,7 +265,7 @@ async function resolveOrProvisionSocialUser(
     const randomPassword = randomBytes(32).toString('hex');
     const password = await bcrypt.hash(randomPassword, env.BCRYPT_ROUNDS);
 
-    await authRepository.createUserWithRoles(
+    await userRepository.createUserWithRoles(
       {
         firstName,
         lastName,
@@ -279,7 +278,7 @@ async function resolveOrProvisionSocialUser(
       [defaultRole.id],
     );
 
-    user = await authRepository.findUserByEmail(email);
+    user = await userRepository.findUserByEmail(email);
     if (!user) {
       throw new AppError(`Unable to complete ${provider} signup`, 500);
     }
@@ -397,16 +396,11 @@ async function consumeAndValidateOtp(
 
   const user =
     type === OtpType.EMAIL
-      ? await authRepository.findUserByEmail(target)
-      : await authRepository.findUserByPhone(target);
+      ? await userRepository.findUserByEmail(target)
+      : await userRepository.findUserByPhone(target);
   if (!user) throw new AppError('Account not found', 404);
 
   return { user, type };
-}
-
-function buildInviteAcceptUrl(token: string): string {
-  const baseUrl = process.env.APP_URL ?? `http://localhost:${env.PORT}`;
-  return `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`;
 }
 
 /**
@@ -420,12 +414,12 @@ export async function register(
   context?: RequestContext,
 ): Promise<RegisterResult> {
   if (input.email) {
-    const existing = await authRepository.findUserByEmail(input.email.toLowerCase());
+    const existing = await userRepository.findUserByEmail(input.email.toLowerCase());
     if (existing) throw new AppError('Email is already in use', 409);
   }
 
   if (input.phone) {
-    const existing = await authRepository.findUserByPhone(input.phone);
+    const existing = await userRepository.findUserByPhone(input.phone);
     if (existing) throw new AppError('Phone number is already in use', 409);
   }
 
@@ -434,7 +428,7 @@ export async function register(
     throw new AppError('At least one role must be selected', 400);
   }
 
-  const selectedRoles = (await authRepository.findRolesByNames(
+  const selectedRoles = (await userRepository.findRolesByNames(
     normalizedRoles,
   )) as unknown as SelectedRole[];
 
@@ -513,8 +507,8 @@ export async function login(input: LoginInput, context?: RequestContext): Promis
   }
 
   const user = input.email
-    ? await authRepository.findUserByEmail(input.email.toLowerCase())
-    : await authRepository.findUserByPhone(input.phone!);
+    ? await userRepository.findUserByEmail(input.email.toLowerCase())
+    : await userRepository.findUserByPhone(input.phone!);
 
   if (!user) {
     await recordFailedAttempt(identifier);
@@ -573,8 +567,8 @@ export async function login(input: LoginInput, context?: RequestContext): Promis
 
   await clearAttempts(identifier);
 
-  const roles = await authRepository.findUserRoleNames(user.id);
-  const permissions = await authRepository.findUserPermissionKeys(user.id);
+  const roles = await userRepository.findUserRoleNames(user.id);
+  const permissions = await userRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roles, permissions);
   const { token: refreshToken } = await issueRefreshToken(user.id);
   const accessToken = signAccessToken({
@@ -758,96 +752,12 @@ export async function forgotPassword(
   const { type, target } = resolveIdentifier(input);
   const user =
     type === OtpType.EMAIL
-      ? await authRepository.findUserByEmail(target)
-      : await authRepository.findUserByPhone(target);
+      ? await userRepository.findUserByEmail(target)
+      : await userRepository.findUserByPhone(target);
   if (!user) throw new AppError('Account not found', 404);
   return generateAndStoreOtp(target, type, OtpPurpose.PASSWORD_RESET, context);
 }
 
-/**
- *  Allows administrators to invite new users to the platform by creating an invitation and sending an email to the invitee.
- * @param input The input containing the invitee's email, phone, roles, and optional invitation channel.
- * @param invitedByUserId The ID of the user who is sending the invitation.
- * @returns An object containing the invitation details, including the invite ID, accept URL, email, phone, channel, and expiration date.
- */
-export async function inviteUser(
-  input: InviteUserInput,
-  invitedByUserId: string,
-): Promise<InviteUserResult> {
-  const email = input.email.toLowerCase();
-  const channel = input.channel ?? 'email';
-  if (channel === 'whatsapp' && !input.phone) {
-    throw new AppError('Phone is required when invitation channel is WhatsApp', 400);
-  }
-
-  const existing = await authRepository.findUserByEmail(email);
-  if (existing) throw new AppError('An account with this email already exists', 409);
-
-  const normalizedRoles = [...new Set(input.roles.map((role) => role.trim().toLowerCase()))];
-  if (normalizedRoles.length === 0) {
-    throw new AppError('At least one role must be selected', 400);
-  }
-
-  const selectedRoles = (await authRepository.findRolesByNames(
-    normalizedRoles,
-  )) as unknown as Array<{ id: string; name: string }>;
-
-  if (selectedRoles.length !== normalizedRoles.length) {
-    throw new AppError('One or more selected roles do not exist', 404);
-  }
-
-  const inviter = await authRepository.findUserById(invitedByUserId);
-  if (!inviter) throw new AppError('Inviter not found', 404);
-
-  const { inviteId, rawToken, expiresAt } = await authRepository.createUserInvite({
-    email,
-    createdBy: invitedByUserId,
-    roleIds: selectedRoles.map((role) => role.id),
-  });
-
-  const acceptUrl = buildInviteAcceptUrl(rawToken);
-  const inviterName = `${inviter.firstName} ${inviter.lastName}`.trim();
-
-  // TODO:: implement this later when we have email/whatsapp service setup
-  // if (channel === 'email') {
-  //   await sendEmail({
-  //     to: email,
-  //     subject: `${env.APP_NAME} staff invitation`,
-  //     html: userInviteTemplate({
-  //       appName: env.APP_NAME,
-  //       inviteeEmail: email,
-  //       invitedBy: inviterName,
-  //       acceptUrl,
-  //       expiresAt,
-  //     }),
-  //   });
-  // } else {
-  //   const message = `You are invited to join ${env.APP_NAME}. Accept invite: ${acceptUrl}`;
-  //   logger.info('staff_invite_whatsapp_dispatch', {
-  //     phone: input.phone,
-  //     email,
-  //     invitedByUserId,
-  //     message,
-  //   });
-  // }
-
-  securityEvent('staff_invite_created', {
-    actorId: invitedByUserId,
-    email,
-    channel,
-    inviteId,
-    roleNames: selectedRoles.map((role) => role.name),
-  });
-
-  return {
-    inviteId,
-    acceptUrl,
-    email,
-    phone: input.phone,
-    channel,
-    expiresAt,
-  };
-}
 
 /**
  *  Allows invitees to accept a user invitation by validating the invitation token and setting up their account with a password and optional name details.
@@ -864,11 +774,11 @@ export async function acceptInvite(
     throw new AppError('Invalid, expired, or already used invite token', 401);
   }
 
-  const existing = await authRepository.findUserByEmail(invite.email);
+  const existing = await userRepository.findUserByEmail(invite.email);
   if (existing) throw new AppError('An account with this email already exists', 409);
 
   const hashedPassword = await bcrypt.hash(input.password, env.BCRYPT_ROUNDS);
-  const user = await authRepository.createInvitedUserWithRoles({
+  const user = await userRepository.createInvitedUserWithRoles({
     firstName: input.firstName,
     lastName: input.lastName,
     email: invite.email,
@@ -877,8 +787,8 @@ export async function acceptInvite(
     assignedBy: invite.createdBy,
   });
 
-  const roles = await authRepository.findUserRoleNames(user.id);
-  const permissions = await authRepository.findUserPermissionKeys(user.id);
+  const roles = await userRepository.findUserRoleNames(user.id);
+  const permissions = await userRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roles, permissions);
   const { token: refreshToken } = await issueRefreshToken(user.id);
   const accessToken = signAccessToken({
@@ -912,15 +822,15 @@ export async function verifyRegistrationOtp(
   const { user, type } = await consumeAndValidateOtp(input, OtpPurpose.REGISTRATION, context);
 
   if (!user.isVerified) {
-    await authRepository.markUserAsVerified(user.id, type);
+    await userRepository.markUserAsVerified(user.id, type);
     user.isVerified = true;
 
     if (type === OtpType.EMAIL) user.isEmailVerified = true;
     else user.isPhoneVerified = true;
   }
 
-  const roles = await authRepository.findUserRoleNames(user.id);
-  const permissions = await authRepository.findUserPermissionKeys(user.id);
+  const roles = await userRepository.findUserRoleNames(user.id);
+  const permissions = await userRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roles, permissions);
   const { token: refreshToken } = await issueRefreshToken(user.id);
 
@@ -980,11 +890,11 @@ export async function resetPassword(
   const userId = await authRepository.consumePasswordResetToken(input.resetToken);
   if (!userId) throw new AppError('Invalid or expired password reset token', 401);
 
-  const user = await authRepository.findUserById(userId);
+  const user = await userRepository.findUserById(userId);
   if (!user) throw new AppError('Account not found', 404);
 
   const hashedPassword = await bcrypt.hash(input.newPassword, env.BCRYPT_ROUNDS);
-  await authRepository.updateUserPassword(user.id, hashedPassword);
+  await userRepository.updateUserPassword(user.id, hashedPassword);
   await authRepository.revokeAllRefreshTokens(user.id);
 
   securityEvent('password_reset_success', {
@@ -1044,7 +954,7 @@ export async function refreshTokens(rawToken: string): Promise<TokenPair> {
     throw new AppError('Refresh token has already been used or revoked', 401);
   }
 
-  const user = await authRepository.findUserById(payload.sub);
+  const user = await userRepository.findUserById(payload.sub);
   if (!user) throw new AppError('User not found', 401);
   if (!user.isActive) throw new AppError('Account is deactivated', 403);
 

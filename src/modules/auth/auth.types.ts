@@ -40,27 +40,11 @@ export interface VerifyPasswordResetOtpResult {
 
 export type InviteChannel = 'email' | 'whatsapp';
 
-export interface InviteUserInput {
-  email: string;
-  phone?: string;
-  roles: string[];
-  channel?: InviteChannel;
-}
-
 export interface AcceptInviteInput {
   token: string;
   firstName: string;
   lastName: string;
   password: string;
-}
-
-export interface InviteUserResult {
-  inviteId: string;
-  acceptUrl: string;
-  email: string;
-  phone?: string;
-  channel: InviteChannel;
-  expiresAt: Date;
 }
 
 export interface ResetPasswordInput {

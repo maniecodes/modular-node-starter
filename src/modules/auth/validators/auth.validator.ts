@@ -23,16 +23,6 @@ export const verifyOtpSchema = emailOrPhoneSchema.extend({
   otpCode: z.string().regex(/^\d{6}$/, 'OTP code must be 6 digits'),
 });
 
-export const inviteUserSchema = z.object({
-  email: z.string().email(),
-  phone: phoneSchema.optional(),
-  roles: z.array(z.string().min(2)).min(1, 'At least one role must be selected'),
-  channel: z.enum(['email', 'whatsapp']).optional(),
-}).refine((v) => (v.channel === 'whatsapp' ? Boolean(v.phone) : true), {
-  message: 'phone is required when channel is whatsapp',
-  path: ['phone'],
-});
-
 export const acceptInviteSchema = z.object({
   token: z.string().min(1, 'Invite token is required'),
   firstName: z.string().min(2).max(100),

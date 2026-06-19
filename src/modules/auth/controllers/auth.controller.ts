@@ -193,28 +193,6 @@ export async function resendOtpHandler(req: Request, res: Response): Promise<voi
 }
 
 /**
- *  Handler for inviting a new user to the platform. 
- *  It creates an invitation and sends an email to the invitee with instructions on how to accept the invitation and create their account.
- *  endpoint: POST /api/v1/auth/invite
- * 
- * @param req 
- * @param res 
- */
-export async function inviteUserHandler(
-  req: AuthenticatedRequest,
-  res: Response,
-): Promise<void> {
-  if (!req.user) throw new AppError('Unauthenticated', 401);
-
-  const result = await authService.inviteUser(
-    req.body as InviteUserInput,
-    req.user.id,
-  );
-
-  sendCreated(res, result, 'User invitation created');
-}
-
-/**
  *  Handler for accepting a user invitation. 
  *  It validates the invitation token and allows the invitee to set up their account by providing their name and password.
  *  endpoint: POST /api/v1/auth/accept-invite

@@ -1,4 +1,3 @@
-// import { createHash } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { AppError } from '@/core/errors/AppError';
 import { env } from '@/core/config/env';
@@ -8,6 +7,18 @@ import { generateInviteToken, hashToken } from '@/common/crypto/token';
 import { prisma } from '@/core/database/prisma';
 import { PASSWORD_RESET_TOKEN_EXPIRY_MINUTES, INVITE_TOKEN_EXPIRY_HOURS, SOCIAL_AUTH_PROVIDERS } from '@/common/constants';
 
+
+type SocialIdentityUserRow = {
+  userId: string;
+  providerUserId: string;
+  providerEmail: string | null;
+};
+
+type SocialIdentityRow = {
+  userId: string;
+  providerUserId: string;
+  providerEmail: string | null;
+};
 
 /**
  *  Helper function to acquire a PostgreSQL advisory lock for OTP operations. 
@@ -27,137 +38,6 @@ async function lockOtpScope(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${scopeKey}))`;
 }
 
-export async function findUserByEmail(email: string) {
-  if (!email) return null;
-
-  return prisma.user.findUnique({
-    where: { email },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-      password: true,
-      isActive: true,
-      isVerified: true,
-      isEmailVerified: true,
-      isPhoneVerified: true,
-    },
-  });
-}
-
-export async function findUserByPhone(phone: string) {
-  if (!phone) return null;
-
-  return prisma.user.findUnique({
-    where: { phone },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-      password: true,
-      isActive: true,
-      isVerified: true,
-      isEmailVerified: true,
-      isPhoneVerified: true,
-    },
-  });
-}
-
-export async function findUserById(id: string) {
-  return prisma.user.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-      isActive: true,
-      isEmailVerified: true,
-      isPhoneVerified: true,
-    },
-  });
-}
-
-export async function createUser(data: {
-  firstName: string;
-  lastName: string;
-  email?: string;
-  phone?: string;
-  password: string;
-}) {
-  return prisma.user.create({
-    data,
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-      isVerified: true,
-      isEmailVerified: true,
-      isPhoneVerified: true,
-    },
-  });
-}
-
-export async function createUserWithRoles(
-  data: {
-    firstName: string;
-    lastName: string;
-    email?: string;
-    phone?: string;
-    password: string;
-    isVerified?: boolean;
-    isEmailVerified?: boolean;
-    isPhoneVerified?: boolean;
-  },
-  roleIds: string[],
-  assignedBy?: string,
-) {
-  return prisma.$transaction(async (tx) => {
-    const user = await tx.user.create({
-      data,
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        phone: true,
-        isVerified: true,
-        isEmailVerified: true,
-        isPhoneVerified: true,
-      },
-    });
-
-    await Promise.all(
-      roleIds.map((roleId) =>
-        tx.userRole.upsert({
-          where: { userId_roleId: { userId: user.id, roleId } },
-          update: {},
-          create: {
-            userId: user.id,
-            roleId,
-            assignedBy: assignedBy ?? user.id,
-          },
-        }),
-      ),
-    );
-
-    return user;
-  });
-}
-
-type SocialIdentityUserRow = {
-  userId: string;
-  providerUserId: string;
-  providerEmail: string | null;
-};
-
 export async function findSocialIdentityUser(
   provider: typeof SOCIAL_AUTH_PROVIDERS[0 | 1],
   providerUserId: string,
@@ -176,12 +56,6 @@ export async function findSocialIdentityUser(
 
   return identity;
 }
-
-type SocialIdentityRow = {
-  userId: string;
-  providerUserId: string;
-  providerEmail: string | null;
-};
 
 export async function findSocialIdentityByUser(
   provider: typeof SOCIAL_AUTH_PROVIDERS[0 | 1],
@@ -252,134 +126,6 @@ export async function linkSocialIdentity(input: {
 
     throw new AppError('Social identity is already linked to another account', 409);
   }
-}
-
-
-export async function markUserAsVerified(userId: string, method: OtpType): Promise<void> {
-  const data =
-    method === OtpType.EMAIL
-      ? { isVerified: true, isEmailVerified: true }
-      : { isVerified: true, isPhoneVerified: true };
-
-  await prisma.user.update({
-    where: { id: userId },
-    data,
-  });
-}
-
-export async function findRolesByNames(names: string[]) {
-  return prisma.role.findMany({
-    where: { name: { in: names } },
-    select: {
-      id: true,
-      name: true,
-      permissions: {
-        select: {
-          permission: {
-            select: { action: true, resource: true },
-          },
-        },
-      },
-    },
-  });
-}
-
-export async function assignRolesToUser(
-  userId: string,
-  roleIds: string[],
-  assignedBy?: string,
-): Promise<void> {
-  await prisma.$transaction(
-    roleIds.map((roleId) =>
-      prisma.userRole.upsert({
-        where: { userId_roleId: { userId, roleId } },
-        update: {},
-        create: { userId, roleId, assignedBy },
-      }),
-    ),
-  );
-}
-
-/**
- *  Helper function to create a new user with assigned roles and an OTP code in a single transaction. 
- *  This is used during registration flows where we want to create the user, assign them default roles, 
- *  and generate an OTP for verification all atomically.
- * @param data // The user data for creating the new user
- * @param roleIds // An array of role IDs to assign to the new user
- * @param otp // The OTP details including target, type, purpose, code, and expiry
- * @param context // Optional context for logging the OTP request (e.g. IP address, user agent)
- * @returns 
- */
-export async function createUserWithRolesAndOtp(
-  data: {
-    firstName: string;
-    lastName: string;
-    email?: string;
-    phone?: string;
-    password: string;
-  },
-  roleIds: string[],
-  otp: {
-    target: string;
-    type: OtpType;
-    purpose: OtpPurpose;
-    code: string;
-    expiresAt: Date;
-  },
-  context?: { ipAddress?: string; userAgent?: string },
-) {
-  return prisma.$transaction(async (tx) => {
-    await lockOtpScope(tx, otp.target, otp.type, otp.purpose);
-
-    const user = await tx.user.create({
-      data,
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        phone: true,
-        isVerified: true,
-        isEmailVerified: true,
-        isPhoneVerified: true,
-      },
-    });
-
-    await Promise.all(
-      roleIds.map((roleId) =>
-        tx.userRole.upsert({
-          where: { userId_roleId: { userId: user.id, roleId } },
-          update: {},
-          create: { userId: user.id, roleId, assignedBy: user.id },
-        }),
-      ),
-    );
-
-    await tx.otpCode.updateMany({
-      where: {
-        target: otp.target,
-        type: otp.type,
-        purpose: otp.purpose,
-        usedAt: null,
-        invalidatedAt: null,
-      },
-      data: { invalidatedAt: new Date() },
-    });
-
-    await tx.otpCode.create({
-      data: {
-        target: otp.target,
-        type: otp.type,
-        purpose: otp.purpose,
-        code: otp.code,
-        expiresAt: otp.expiresAt,
-        requestedIp: context?.ipAddress,
-        requestedUserAgent: context?.userAgent,
-      },
-    });
-
-    return user;
-  });
 }
 
 /** 
@@ -580,59 +326,6 @@ export async function consumeOtpCode(
   });
 }
 
-export async function updateUserPassword(userId: string, hashedPassword: string): Promise<void> {
-  await prisma.user.update({
-    where: { id: userId },
-    data: { password: hashedPassword },
-  });
-}
-
-export async function findUserRoleNames(userId: string): Promise<string[]> {
-  const userRoles = await prisma.userRole.findMany({
-    where: { userId },
-    select: {
-      role: {
-        select: { name: true },
-      },
-    },
-  });
-
-  return userRoles.map((ur) => ur.role.name);
-}
-
-/**
- *  Helper function to find all permission keys (in the format "resource.action") for a user based on their assigned roles. 
- *  This is used during authorization checks to determine if a user has the necessary permissions to perform an action.
- * @param userId // The ID of the user for whom to retrieve permission keys
- * @returns An array of permission keys that the user has through their roles
- */
-export async function findUserPermissionKeys(userId: string): Promise<string[]> {
-  const userRoles = await prisma.userRole.findMany({
-    where: { userId },
-    select: {
-      role: {
-        select: {
-          permissions: {
-            select: {
-              permission: {
-                select: { action: true, resource: true },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  return [
-    ...new Set(
-      userRoles.flatMap((ur) =>
-        ur.role.permissions.map((rp) => `${rp.permission.resource}.${rp.permission.action}`),
-      ),
-    ),
-  ];
-}
-
 // ---------------------------------------------------------------------------
 // Refresh token storage (rotation + revocation)
 // ---------------------------------------------------------------------------
@@ -752,56 +445,7 @@ export async function consumePasswordResetToken(rawToken: string): Promise<strin
   });
 }
 
-type CreateUserInviteParams = {
-  email: string;
-  createdBy: string;
-  roleIds: string[];
-};
 
-/**
- *  Creates a new user invite with a unique token, stores its hash in the database with an expiry time, and returns the raw token along with invite details. 
- *  This is used to invite new users to the platform by generating a one-time token that can be sent to their email, allowing them to accept the invite and create an account with pre-assigned roles.
- * @param params The parameters for creating the user invite, including email, creator, and role IDs.
- * @returns The invite details including invite ID, raw token, and expiry date.
- */
-export async function createUserInvite(params: CreateUserInviteParams): Promise<{
-  inviteId: string;
-  rawToken: string;
-  expiresAt: Date;
-}> {
-  const rawToken = generateInviteToken();
-  const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date(Date.now() + INVITE_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
-
-  const invite = await prisma.$transaction(async (tx) => {
-    // Invalidate any previously active invite for this email to prevent parallel valid invites.
-    await tx.userInvite.updateMany({
-      where: {
-        email: params.email,
-        usedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      data: { usedAt: new Date() },
-    });
-
-    return tx.userInvite.create({
-      data: {
-        email: params.email,
-        tokenHash,
-        expiresAt,
-        createdBy: params.createdBy,
-        userInviteRoles: {
-          createMany: {
-            data: params.roleIds.map((roleId) => ({ roleId })),
-          },
-        },
-      },
-      select: { id: true },
-    });
-  });
-
-  return { inviteId: invite.id, rawToken, expiresAt };
-}
 
 /**
  *  Verifies a user invite token by checking if its hash exists in the database, is not expired, and has not been used. 
@@ -852,51 +496,82 @@ export async function consumeUserInvite(rawToken: string): Promise<{
 }
 
 /**
- *  Helper function to create a new user based on an accepted invite, assign them the roles specified in the invite, and mark the invite as used. 
- *  This is used during the onboarding flow when a user accepts an invite and we need to create their account with the appropriate roles.
- * @param input The input parameters for creating the invited user, including personal details, password, role IDs, and optionally the ID of the user who assigned the roles.
- * @returns The newly created user with their assigned roles.
+ *  Helper function to create a new user with assigned roles and an OTP code in a single transaction. 
+ *  This is used during registration flows where we want to create the user, assign them default roles, 
+ *  and generate an OTP for verification all atomically.
+ * @param data // The user data for creating the new user
+ * @param roleIds // An array of role IDs to assign to the new user
+ * @param otp // The OTP details including target, type, purpose, code, and expiry
+ * @param context // Optional context for logging the OTP request (e.g. IP address, user agent)
+ * @returns 
  */
-export async function createInvitedUserWithRoles(input: {
-  firstName: string;
-  lastName: string;
-  email: string;
-  password: string;
-  roleIds: string[];
-  assignedBy?: string;
-}) {
+export async function createUserWithRolesAndOtp(
+  data: {
+    firstName: string;
+    lastName: string;
+    email?: string;
+    phone?: string;
+    password: string;
+  },
+  roleIds: string[],
+  otp: {
+    target: string;
+    type: OtpType;
+    purpose: OtpPurpose;
+    code: string;
+    expiresAt: Date;
+  },
+  context?: { ipAddress?: string; userAgent?: string },
+) {
   return prisma.$transaction(async (tx) => {
+    await lockOtpScope(tx, otp.target, otp.type, otp.purpose);
+
     const user = await tx.user.create({
-      data: {
-        firstName: input.firstName,
-        lastName: input.lastName,
-        email: input.email,
-        password: input.password,
-        isVerified: true,
-        isEmailVerified: true,
-      },
+      data,
       select: {
         id: true,
         firstName: true,
         lastName: true,
         email: true,
         phone: true,
+        isVerified: true,
         isEmailVerified: true,
         isPhoneVerified: true,
       },
     });
 
     await Promise.all(
-      input.roleIds.map((roleId) =>
-        tx.userRole.create({
-          data: {
-            userId: user.id,
-            roleId,
-            assignedBy: input.assignedBy,
-          },
+      roleIds.map((roleId) =>
+        tx.userRole.upsert({
+          where: { userId_roleId: { userId: user.id, roleId } },
+          update: {},
+          create: { userId: user.id, roleId, assignedBy: user.id },
         }),
       ),
     );
+
+    await tx.otpCode.updateMany({
+      where: {
+        target: otp.target,
+        type: otp.type,
+        purpose: otp.purpose,
+        usedAt: null,
+        invalidatedAt: null,
+      },
+      data: { invalidatedAt: new Date() },
+    });
+
+    await tx.otpCode.create({
+      data: {
+        target: otp.target,
+        type: otp.type,
+        purpose: otp.purpose,
+        code: otp.code,
+        expiresAt: otp.expiresAt,
+        requestedIp: context?.ipAddress,
+        requestedUserAgent: context?.userAgent,
+      },
+    });
 
     return user;
   });
