@@ -10,3 +10,8 @@ export const inviteUserSchema = z.object({
     message: 'phone is required when channel is whatsapp',
     path: ['phone'],
 });
+
+export const getUsersQuerySchema = z.object({
+    page: z.coerce.number().int().positive().optional(),
+    perPage: z.coerce.number().int().positive().max(100).optional(),
+});

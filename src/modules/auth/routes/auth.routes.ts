@@ -31,6 +31,9 @@ import {
   verifyOtpHandler,
 } from '../controllers/auth.controller';
 
+// Auth router
+// Mounted at /api/v1/auth
+
 const router = Router();
 
 

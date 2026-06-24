@@ -77,6 +77,28 @@ export async function findUserById(id: string) {
   });
 }
 
+export async function findAllUsers(params: { skip: number; take: number }) {
+  const [items, total] = await Promise.all([
+    prisma.user.findMany({
+      skip: params.skip,
+      take: params.take,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        isActive: true,
+        isEmailVerified: true,
+        isPhoneVerified: true,
+      },
+    }),
+    prisma.user.count(),
+  ]);
+  return { items, total };
+}
+
 export async function createUser(data: {
   firstName: string;
   lastName: string;

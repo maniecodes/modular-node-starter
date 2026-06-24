@@ -1,3 +1,5 @@
+import { InviteChannel } from '@/modules/auth/auth.types';
+
 export interface InviteUserInput {
     email: string;
     phone?: string;

@@ -19,13 +19,27 @@ export interface ApiResponse<T = unknown> {
 
 export interface PaginationQuery {
   page?: number;
-  limit?: number;
+  perPage?: number;
+}
+
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
+
+export interface PaginationLinks {
+  first: string;
+  last: string;
+  prev: string | null;
+  next: string | null;
 }
 
 export interface PaginatedResult<T> {
   items: T[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
+  meta: PaginationMeta;
+  links: PaginationLinks;
 }

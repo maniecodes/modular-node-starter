@@ -42,9 +42,6 @@ const wrap =
 
 // Roles router
 // Mounted at /api/v1/roles
-//
-// NOTE: /users/* routes are registered BEFORE /:id routes to prevent Express
-// from matching the literal string \users\ as the :id param.
 
 export const rolesRouter = Router();
 
@@ -54,7 +51,6 @@ rolesRouter.use(requireAuth);
 rolesRouter.get('/', authorize('roles.read'), wrap(listRolesHandler));
 rolesRouter.post('/', authorize('roles.create'), validate(createRoleSchema), wrap(createRoleHandler));
 
-// User-scoped — must be BEFORE /:id
 rolesRouter.get('/users/:userId', authorize('roles.read'), wrap(getUserWithPermissionsHandler));
 rolesRouter.get('/users/:userId/roles', authorize('roles.read'), wrap(getUserRolesHandler));
 rolesRouter.get('/users/:userId/has-role/:roleName', authorize('roles.read'), wrap(checkUserRoleHandler));

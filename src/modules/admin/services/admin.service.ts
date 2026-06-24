@@ -25,6 +25,7 @@ import {
     InviteUserInput,
     InviteUserResult
 } from '@/modules/admin/admin.types';
+import { ParsedPagination } from '@/common/helpers/pagination';
 
 function buildInviteAcceptUrl(token: string): string {
     const baseUrl = process.env.APP_URL ?? `http://localhost:${env.PORT}`;
@@ -114,4 +115,8 @@ export async function inviteUser(
         channel,
         expiresAt,
     };
+}
+
+export async function getUsers(pagination: ParsedPagination) {
+    return userRepository.findAllUsers({ skip: pagination.skip, take: pagination.take });
 }

@@ -3,7 +3,6 @@ import * as authService from '../services/auth.service';
 import {
   AcceptInviteInput,
   FacebookLoginInput,
-  InviteUserInput,
   LoginInput,
   GoogleLoginInput,
   OAuthCallbackQueryInput,
