@@ -2,8 +2,9 @@ import { AppError } from '@/core/errors/AppError';
 import { securityEvent } from '@/core/audit/security-events';
 import { writeAuditLog } from '@/core/audit/audit-log.repository';
 import { invalidateCachedContext } from '@/core/cache/user-context-cache';
-import * as repo from '../repositories/roles.repository';
-import { CreatePermissionInput, CreateRoleInput } from '../roles.types';
+import * as repo from '@/modules/roles/repositories/roles.repository';
+import { CreatePermissionInput, CreateRoleInput } from '@/modules/roles/roles.types';
+import { ParsedPagination } from '@/common/helpers/pagination';
 
 // ─── Roles ────────────────────────────────────────────────────────────────────
 
@@ -13,8 +14,8 @@ export async function createRole(input: CreateRoleInput) {
   return repo.createRole(input);
 }
 
-export async function listRoles() {
-  return repo.findAllRoles();
+export async function listRoles(pagination: ParsedPagination) {
+  return repo.findAllRoles({ skip: pagination.skip, take: pagination.take });
 }
 
 export async function getRoleById(id: string) {

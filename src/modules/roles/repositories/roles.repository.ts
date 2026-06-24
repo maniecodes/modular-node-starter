@@ -11,11 +11,16 @@ export async function createRole(data: CreateRoleInput) {
 }
 
 export async function findAllRoles() {
-  return prisma.role.findMany({
-    select: { id: true, name: true, description: true, createdAt: true },
-    orderBy: { name: 'asc' },
-  });
+  const [items, total] = await prisma.$transaction([
+    prisma.role.findMany({
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, description: true, createdAt: true },
+    }),
+    prisma.role.count(),
+  ]);
+  return { items, total };
 }
+
 
 export async function findRoleById(id: string) {
   return prisma.role.findUnique({

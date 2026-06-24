@@ -2,7 +2,7 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '@/common/types';
 import { parsePaginationQuery, buildPaginatedResponse, ParsedPagination } from './pagination';
-import { sendSuccess } from './response';
+import { sendPaginatedSuccess } from './response';
 
 type PaginatedFetcher<T> = (pagination: ParsedPagination) => Promise<{ items: T[]; total: number }>;
 
@@ -16,6 +16,6 @@ export function withPagination<T>(
         const pagination = parsePaginationQuery(req.query as Record<string, unknown>);
         const { items, total } = await fetcher(pagination);
         const result = buildPaginatedResponse(items, total, pagination, req);
-        sendSuccess(res, result, message);
+        sendPaginatedSuccess(res, result, message);
     };
 }

@@ -78,7 +78,7 @@ export async function findUserById(id: string) {
 }
 
 export async function findAllUsers(params: { skip: number; take: number }) {
-  const [items, total] = await Promise.all([
+  const [items, total] = await prisma.$transaction([
     prisma.user.findMany({
       skip: params.skip,
       take: params.take,

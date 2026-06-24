@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '@/common/types';
 import { sendSuccess, sendCreated, sendNoContent } from '@/common/helpers/response';
 import * as service from '../services/roles.service';
+import { withPagination } from '@/common/helpers/paginated-handler';
 
 // Roles
 
@@ -10,10 +11,10 @@ export async function createRoleHandler(req: AuthenticatedRequest, res: Response
   sendCreated(res, role, 'Role created');
 }
 
-export async function listRolesHandler(_req: AuthenticatedRequest, res: Response): Promise<void> {
-  const roles = await service.listRoles();
-  sendSuccess(res, roles);
-}
+export const listRolesHandler = withPagination(
+  (pagination) => service.listRoles(pagination),
+  'Retrieved all roles',
+);
 
 export async function getRoleHandler(req: AuthenticatedRequest, res: Response): Promise<void> {
   const role = await service.getRoleById(req.params.id as string);
