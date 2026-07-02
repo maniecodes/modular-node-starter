@@ -66,6 +66,7 @@ const tokenRecord = {
   id: 'rt-1',
   userId: 'user-1',
   tokenHash: 'abc123',
+  familyId: 'family-1',
   revokedAt: null,
   expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
   createdAt: new Date(),
@@ -694,7 +695,7 @@ describe('authService.login', () => {
 
     await authService.login({ email: 'sam@gmail.com', password: 'Password1' });
 
-    expect(mockAuthRepo.storeRefreshToken).toHaveBeenCalledWith('user-1', 'refresh', expect.any(Date));
+    expect(mockAuthRepo.storeRefreshToken).toHaveBeenCalledWith('user-1', 'refresh', expect.any(Date), undefined, undefined);
   });
 
   it('throws 429 when the account is locked out', async () => {
@@ -829,6 +830,8 @@ describe('authService.refreshTokens', () => {
       'user-1',
       'new-refresh',
       expect.any(Date),
+      'family-1',
+      undefined,
     );
   });
 });

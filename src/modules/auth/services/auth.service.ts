@@ -67,14 +67,17 @@ type SafeUserRecord = {
  * Signs a refresh token, stores its hash in DB, and returns the token string.
  * expiresIn is the JWT `exp` unix timestamp returned by verifyRefreshToken.
  */
-async function issueRefreshToken(userId: string): Promise<{ token: string; expiresAt: Date }> {
+async function issueRefreshToken(
+  userId: string,
+  familyId?: string,
+  context?: RequestContext,
+): Promise<{ token: string; expiresAt: Date; familyId: string }> {
+  console.log('issueRefreshToken called with userId:', userId, 'familyId:', familyId, 'context:', context);
   const token = signRefreshToken(userId);
-  // Decode our own token to get the canonical expiry — avoids duplicating the
-  // env.JWT_REFRESH_EXPIRES_IN parsing logic here.
   const { exp } = verifyRefreshToken(token);
   const expiresAt = new Date(exp * 1000);
-  await authRepository.storeRefreshToken(userId, token, expiresAt);
-  return { token, expiresAt };
+  const newFamilyId = await authRepository.storeRefreshToken(userId, token, expiresAt, familyId, context);
+  return { token, expiresAt, familyId: newFamilyId };
 }
 
 /**
@@ -143,7 +146,7 @@ async function finalizeSocialLogin(
   const roleNames = await userRepository.findUserRoleNames(user.id);
   const permissions = await userRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roleNames, permissions);
-  const { token: refreshToken } = await issueRefreshToken(user.id);
+  const { token: refreshToken } = await issueRefreshToken(user.id, undefined, context);
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email ?? undefined,
@@ -570,7 +573,7 @@ export async function login(input: LoginInput, context?: RequestContext): Promis
   const roles = await userRepository.findUserRoleNames(user.id);
   const permissions = await userRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roles, permissions);
-  const { token: refreshToken } = await issueRefreshToken(user.id);
+  const { token: refreshToken } = await issueRefreshToken(user.id, undefined, context);
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email ?? undefined,
@@ -790,7 +793,7 @@ export async function acceptInvite(
   const roles = await userRepository.findUserRoleNames(user.id);
   const permissions = await userRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roles, permissions);
-  const { token: refreshToken } = await issueRefreshToken(user.id);
+  const { token: refreshToken } = await issueRefreshToken(user.id, undefined, context);
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email ?? undefined,
@@ -832,7 +835,7 @@ export async function verifyRegistrationOtp(
   const roles = await userRepository.findUserRoleNames(user.id);
   const permissions = await userRepository.findUserPermissionKeys(user.id);
   const safeUser = buildSafeUser(user, roles, permissions);
-  const { token: refreshToken } = await issueRefreshToken(user.id);
+  const { token: refreshToken } = await issueRefreshToken(user.id, undefined, context);
 
   const accessToken = signAccessToken({
     sub: user.id,
@@ -940,7 +943,7 @@ export async function resendOtp(
  * @param rawToken The raw refresh token to be validated and used for issuing new tokens.
  * @returns A promise that resolves to an object containing the new access token and refresh token.
  */
-export async function refreshTokens(rawToken: string): Promise<TokenPair> {
+export async function refreshTokens(rawToken: string, context?: RequestContext): Promise<TokenPair> {
   let payload: { sub: string };
   try {
     payload = verifyRefreshToken(rawToken);
@@ -948,17 +951,22 @@ export async function refreshTokens(rawToken: string): Promise<TokenPair> {
     throw new AppError('Invalid or expired refresh token', 401);
   }
 
-  const record = await authRepository.consumeRefreshToken(rawToken);
+  const record = await authRepository.consumeRefreshToken(rawToken, context);
   if (!record) {
-    securityEvent('refresh_replay_denied', { userId: payload.sub });
+    securityEvent('refresh_replay_denied', {
+      userId: payload.sub,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+    });
     throw new AppError('Refresh token has already been used or revoked', 401);
   }
 
-  const user = await userRepository.findUserById(payload.sub);
+  const user = await userRepository.findUserById(record.userId);
   if (!user) throw new AppError('User not found', 401);
   if (!user.isActive) throw new AppError('Account is deactivated', 403);
 
-  const { token: newRefreshToken } = await issueRefreshToken(user.id);
+  // Rotate within the same family so reuse detection covers the full chain.
+  const { token: newRefreshToken } = await issueRefreshToken(user.id, record.familyId, context);
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email ?? undefined,

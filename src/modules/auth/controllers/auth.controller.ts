@@ -73,7 +73,7 @@ export async function registerHandler(req: Request, res: Response): Promise<void
  * @param res 
  */
 export async function loginHandler(req: Request, res: Response): Promise<void> {
-  const result = await authService.login(req.body as LoginInput);
+  const result = await authService.login(req.body as LoginInput, getRequestContext(req));
   sendSuccess(res, result, 'Login successful');
 }
 
@@ -175,7 +175,7 @@ export async function resetPasswordHandler(req: Request, res: Response): Promise
  */
 export async function refreshHandler(req: Request, res: Response): Promise<void> {
   const { refreshToken } = req.body as RefreshInput;
-  const tokens = await authService.refreshTokens(refreshToken);
+  const tokens = await authService.refreshTokens(refreshToken, getRequestContext(req));
   sendSuccess(res, tokens, 'Tokens refreshed');
 }
 

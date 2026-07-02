@@ -3,7 +3,7 @@ import { AppError } from '@/core/errors/AppError';
 import { env } from '@/core/config/env';
 import { OtpPurpose, OtpType, Prisma } from '@prisma/client';
 import { OTP_EXPIRY_SKEW_MS, OTP_RESEND_COOLDOWN_MS, MAX_OTP_REQUESTS_PER_WINDOW } from '@/common/constants';
-import { generateInviteToken, hashToken } from '@/common/crypto/token';
+import { generateInviteToken, hashToken, generateFamilyId } from '@/common/crypto/token';
 import { prisma } from '@/core/database/prisma';
 import { PASSWORD_RESET_TOKEN_EXPIRY_MINUTES, INVITE_TOKEN_EXPIRY_HOURS, SOCIAL_AUTH_PROVIDERS } from '@/common/constants';
 
@@ -330,35 +330,80 @@ export async function consumeOtpCode(
 // Refresh token storage (rotation + revocation)
 // ---------------------------------------------------------------------------
 
-/** Stores the SHA-256 hash of a raw refresh token. Never stores the raw value. */
+/** Stores the SHA-256 hash of a raw refresh token. Never stores the raw value.
+ * Returns the familyId so the caller can thread it through rotation. */
 export async function storeRefreshToken(
   userId: string,
   rawToken: string,
   expiresAt: Date,
-): Promise<void> {
+  familyId?: string,
+  context?: { ipAddress?: string; userAgent?: string },
+): Promise<string> {
+  const newFamilyId = familyId ?? generateFamilyId();
+
   await prisma.refreshToken.create({
-    data: { userId, tokenHash: hashToken(rawToken), expiresAt },
+    data: {
+      userId,
+      tokenHash: hashToken(rawToken),
+      familyId: newFamilyId,
+      expiresAt,
+      requestedIp: context?.ipAddress ?? null,
+      requestedUserAgent: context?.userAgent ?? null,
+    },
   });
+  return newFamilyId;
 }
 
 /**
- * Verifies the token exists in DB and hasn't expired, then deletes it
- * atomically. Returns the matching record, or null if not found / expired.
+ * Soft-deletes the token (marks usedAt) and returns { userId, familyId }.
  *
- * Deletion is done in the same operation so a second concurrent request with
- * the same token will fail to find it (the race condition window is reduced to
- * the DB transaction time rather than application round-trip time).
+ * Reuse detection: if the token is found but already has usedAt or revokedAt,
+ * the entire token family is revoked — a stolen token was replayed.
+ *
+ * IP binding: if the stored IP differs from the current request IP the token
+ * is revoked and null is returned.
+ *
+ * Returns null in all failure cases; the caller fires the security event.
  */
-export async function consumeRefreshToken(rawToken: string) {
+export async function consumeRefreshToken(
+  rawToken: string,
+  context?: { ipAddress?: string; userAgent?: string },
+): Promise<{ userId: string; familyId: string } | null> {
   const tokenHash = hashToken(rawToken);
 
   return prisma.$transaction(async (tx) => {
     const record = await tx.refreshToken.findUnique({ where: { tokenHash } });
+
     if (!record || record.expiresAt < new Date()) return null;
-    await tx.refreshToken.delete({
+
+    // Reuse detected: token already consumed or explicitly revoked. N
+    // Nuke every active token in the family.
+    if (record.usedAt || record.revokedAt) {
+      await tx.refreshToken.updateMany({
+        where: { familyId: record.familyId, revokedAt: null, usedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return null;
+    }
+
+    if (
+      record.requestedIp &&
+      context?.ipAddress &&
+      record.requestedIp !== context.ipAddress
+    ) {
+      await tx.refreshToken.update({
+        where: { tokenHash },
+        data: { revokedAt: new Date() },
+      });
+      return null;
+    }
+
+    await tx.refreshToken.update({
       where: { tokenHash },
+      data: { usedAt: new Date() },
     });
-    return record;
+
+    return { userId: record.userId, familyId: record.familyId };
   });
 }
 
@@ -368,8 +413,9 @@ export async function consumeRefreshToken(rawToken: string) {
  * @param rawToken The raw refresh token to be revoked
  */
 export async function revokeRefreshToken(rawToken: string): Promise<void> {
-  await prisma.refreshToken.deleteMany({
+  await prisma.refreshToken.updateMany({
     where: { tokenHash: hashToken(rawToken) },
+    data: { revokedAt: new Date() },
   });
 }
 
@@ -379,7 +425,10 @@ export async function revokeRefreshToken(rawToken: string): Promise<void> {
  * @param userId The ID of the user whose refresh tokens are to be revoked.
  */
 export async function revokeAllRefreshTokens(userId: string): Promise<void> {
-  await prisma.refreshToken.deleteMany({ where: { userId } });
+  await prisma.refreshToken.updateMany({
+    where: { userId, revokedAt: null, usedAt: null },
+    data: { revokedAt: new Date() },
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { validate } from '@/core/middleware/validate.middleware';
 import { requireAuth } from '@/core/middleware/auth.middleware';
+import { refreshLimiter } from '@/core/middleware/rate-limit';
 import {
   acceptInviteSchema,
   facebookLoginSchema,
@@ -44,7 +45,7 @@ router.post('/login/facebook', validate(facebookLoginSchema), facebookLoginHandl
 router.get('/callback/facebook', validate(oauthCallbackQuerySchema, 'query'), facebookCallbackHandler);
 router.post('/logout', requireAuth, validate(logoutSchema), logoutHandler);
 router.post('/forgot-password', validate(forgotPasswordSchema), forgotPasswordHandler);
-router.post('/refresh', validate(refreshSchema), refreshHandler);
+router.post('/refresh', refreshLimiter, validate(refreshSchema), refreshHandler);
 router.post('/register', validate(registerSchema), registerHandler);
 router.post('/accept-invite', validate(acceptInviteSchema), acceptInviteHandler);
 router.post('/resend-otp', validate(resendOtpSchema), resendOtpHandler);
