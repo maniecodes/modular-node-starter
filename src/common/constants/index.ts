@@ -11,3 +11,13 @@ export const PASSWORD_RESET_TOKEN_EXPIRY_MINUTES = 15; // Password reset tokens 
 export const INVITE_TOKEN_EXPIRY_HOURS = 48; // Invite tokens are valid for 48 hours
 
 export const SOCIAL_AUTH_PROVIDERS = ['google', 'facebook'] as const; 
+
+// Pagination constants
+export const DEFAULT_PAGE=1;
+export const DEFAULT_PER_PAGE=20;
+export const MAX_PER_PAGE=100;
+
+// Login protection constants
+export const MAX_ATTEMPTS = 5;
+export const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+export const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes

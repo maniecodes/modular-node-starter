@@ -31,13 +31,10 @@ export async function createPermissionHandler(
   sendCreated(res, permission, 'Permission created');
 }
 
-export async function listPermissionsHandler(
-  _req: AuthenticatedRequest,
-  res: Response,
-): Promise<void> {
-  const permissions = await service.listPermissions();
-  sendSuccess(res, permissions);
-}
+export const listPermissionsHandler = withPagination(
+  (pagination) => service.listPermissions(pagination),
+  'Retrieved all permissions',
+);
 
 // Role <-> Permission assignments
 
@@ -115,13 +112,10 @@ export async function checkUserPermissionHandler(
   sendSuccess(res, result);
 }
 
-export async function getRolePermissionsHandler(
-  req: AuthenticatedRequest,
-  res: Response,
-): Promise<void> {
-  const permissions = await service.getRolePermissions(req.params.id as string);
-  sendSuccess(res, permissions);
-}
+export const getRolePermissionsHandler = withPagination(
+  (req, pagination) => service.getRolePermissions(req.params.id as string, pagination),
+  'Retrieved all permissions for the role',
+);
 
 export async function deleteRoleHandler(req: AuthenticatedRequest, res: Response): Promise<void> {
   await service.deleteRole(req.params.id as string);

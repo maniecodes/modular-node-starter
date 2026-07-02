@@ -1,9 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/core/database/prisma';
-
-const MAX_ATTEMPTS = 5;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
+import { AppError } from '@/core/errors/AppError';
+import { MAX_ATTEMPTS, WINDOW_MS, LOCKOUT_MS } from '@/common/constants';
 
 async function lockAttemptScope(
   tx: Prisma.TransactionClient,

@@ -1,9 +1,6 @@
 import { Request } from 'express';
 import { PaginatedResult, PaginationLinks, PaginationMeta } from '@/common/types';
-
-const DEFAULT_PAGE = 1;
-const DEFAULT_PER_PAGE = 20;
-const MAX_PER_PAGE = 100;
+import { DEFAULT_PAGE, DEFAULT_PER_PAGE, MAX_PER_PAGE } from '@/common/constants';
 
 export interface ParsedPagination {
     page: number;

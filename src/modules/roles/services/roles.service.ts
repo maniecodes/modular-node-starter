@@ -40,8 +40,8 @@ export async function createPermission(input: CreatePermissionInput) {
   return repo.createPermission({ ...input, action, resource });
 }
 
-export async function listPermissions() {
-  return repo.findAllPermissions();
+export async function listPermissions(pagination: ParsedPagination) {
+  return repo.findAllPermissions({ skip: pagination.skip, take: pagination.take });
 }
 
 // ─── Role ↔ Permission assignments ───────────────────────────────────────────
@@ -170,10 +170,10 @@ export async function checkUserHasPermission(userId: string, permission: string)
   return { hasPermission: permissions.includes(permission) };
 }
 
-export async function getRolePermissions(roleId: string) {
+export async function getRolePermissions(roleId: string, pagination?: ParsedPagination) {
   const role = await repo.findRoleById(roleId);
   if (!role) throw new AppError('Role not found', 404);
-  return role.permissions.map((rp) => rp.permission);
+  return repo.findRolePermissions(roleId, pagination?.skip, pagination?.take);
 }
 
 export async function deleteRole(id: string) {

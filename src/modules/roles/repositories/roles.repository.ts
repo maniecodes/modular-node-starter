@@ -10,9 +10,11 @@ export async function createRole(data: CreateRoleInput) {
   });
 }
 
-export async function findAllRoles() {
+export async function findAllRoles(params: { skip: number; take: number }) {
   const [items, total] = await prisma.$transaction([
     prisma.role.findMany({
+      skip: params.skip,
+      take: params.take,
       orderBy: { name: 'asc' },
       select: { id: true, name: true, description: true, createdAt: true },
     }),
@@ -67,11 +69,17 @@ export async function createPermission(data: CreatePermissionInput) {
   });
 }
 
-export async function findAllPermissions() {
-  return prisma.permission.findMany({
-    select: { id: true, action: true, resource: true, description: true, createdAt: true },
-    orderBy: [{ resource: 'asc' }, { action: 'asc' }],
-  });
+export async function findAllPermissions(params: { skip: number; take: number }) {
+  const [items, total] = await prisma.$transaction([
+    prisma.permission.findMany({
+      skip: params.skip,
+      take: params.take,
+      select: { id: true, action: true, resource: true, description: true, createdAt: true },
+      orderBy: [{ resource: 'asc' }, { action: 'asc' }],
+    }),
+    prisma.permission.count(),
+  ]);
+  return { items, total };
 }
 
 export async function findPermissionById(id: string) {
@@ -98,6 +106,29 @@ export async function revokePermissionFromRole(roleId: string, permissionId: str
   return prisma.rolePermission.delete({
     where: { roleId_permissionId: { roleId, permissionId } },
   });
+}
+
+export async function findRolePermissions(roleId: string, skip?: number, take?: number) {
+  const [items, total] = await prisma.$transaction([
+    prisma.rolePermission.findMany({
+      where: { roleId },
+      skip,
+      take,
+      select: {
+        permission: {
+          select: {
+            id: true,
+            action: true,
+            resource: true,
+            description: true,
+            createdAt: true,
+          },
+        },
+      },
+    }),
+    prisma.rolePermission.count({ where: { roleId } }),
+  ]);
+  return { items: items.map((rp) => rp.permission), total };
 }
 
 // ─── User ↔ Role assignments ──────────────────────────────────────────────────
