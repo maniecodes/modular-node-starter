@@ -26,6 +26,7 @@ import {
     InviteUserResult
 } from '@/modules/admin/admin.types';
 import { ParsedPagination } from '@/common/helpers/pagination';
+import { ParsedFilters } from '@/common/helpers/filter-search.types';
 
 function buildInviteAcceptUrl(token: string): string {
     const baseUrl = process.env.APP_URL ?? `http://localhost:${env.PORT}`;
@@ -117,6 +118,6 @@ export async function inviteUser(
     };
 }
 
-export async function getUsers(pagination: ParsedPagination) {
-    return userRepository.findAllUsers({ skip: pagination.skip, take: pagination.take });
+export async function getUsers(filters: ParsedFilters, pagination: ParsedPagination) {
+    return userRepository.findAllUsers(filters, { skip: pagination.skip, take: pagination.take });
 }

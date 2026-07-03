@@ -5,7 +5,7 @@ import { AppError } from '@/core/errors/AppError';
 import { parsePaginationQuery, buildPaginatedResponse, ParsedPagination } from './pagination';
 import { sendPaginatedSuccess } from './response';
 
-type PaginatedFetcher<T> = (req: AuthenticatedRequest, pagination: ParsedPagination) => Promise<{ items: T[]; total: number }>;
+type PaginatedFetcher<T> = (pagination: ParsedPagination) => Promise<{ items: T[]; total: number }>;
 
 export function withPagination<T>(
     fetcher: PaginatedFetcher<T>,
@@ -15,7 +15,7 @@ export function withPagination<T>(
         if (!req.user) throw new AppError('Unauthenticated', 401);
 
         const pagination = parsePaginationQuery(req.query as Record<string, unknown>);
-        const { items, total } = await fetcher(req, pagination);
+        const { items, total } = await fetcher(pagination);
         const result = buildPaginatedResponse(items, total, pagination, req);
         sendPaginatedSuccess(res, result, message);
     };

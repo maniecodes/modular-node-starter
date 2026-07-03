@@ -14,4 +14,7 @@ export const inviteUserSchema = z.object({
 export const getUsersQuerySchema = z.object({
     page: z.coerce.number().int().positive().optional(),
     perPage: z.coerce.number().int().positive().max(100).optional(),
+    search: z.string().optional(),
+    searchFields: z.string().optional(),
+    filter: z.union([z.string(), z.array(z.string())]).optional(),
 });

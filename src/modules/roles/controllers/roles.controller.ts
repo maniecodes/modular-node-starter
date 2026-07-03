@@ -1,8 +1,10 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '@/common/types';
-import { sendSuccess, sendCreated, sendNoContent } from '@/common/helpers/response';
+import { sendSuccess, sendCreated, sendNoContent, sendPaginatedSuccess } from '@/common/helpers/response';
+import { parsePaginationQuery, buildPaginatedResponse } from '@/common/helpers/pagination';
 import * as service from '../services/roles.service';
 import { withPagination } from '@/common/helpers/paginated-handler';
+import { AppError } from '@/core/errors/AppError';
 
 // Roles
 

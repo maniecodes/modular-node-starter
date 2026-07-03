@@ -6,6 +6,8 @@ import { sendCreated, sendSuccess } from '@/common/helpers/response';
 import { parsePaginationQuery, buildPaginatedResponse } from '@/common/helpers/pagination';
 import { InviteUserInput } from '@/modules/admin/admin.types';
 import { withPagination } from '@/common/helpers/paginated-handler';
+import { withFilterSearch } from '@/common/helpers/filter-search.hof';
+import { FilterSearchConfig } from '@/common/helpers/filter-search.types';
 
 
 /**
@@ -32,13 +34,28 @@ export async function inviteUserHandler(
 
 /**
  * Handler for retrieving a paginated list of users in the system.
- * It supports pagination through query parameters and returns a structured response containing the users and pagination metadata.
- * endpoint: GET /api/v1/admin/users
+ * Supports filtering by isActive, role, and createdAt; full-text searching across name, email, and phone.
+ * Query examples:
+ *   GET /api/v1/admin/users?search=john&page=1&limit=10
+ *   GET /api/v1/admin/users?search=john&searchFields=firstName,lastName&page=1&limit=10
+ *   GET /api/v1/admin/users?filter=isActive:true&filter=role:admin
+ *   GET /api/v1/admin/users?filter=createdAt:2024-01-01,2024-12-31&page=1
+ *   endpoint: GET /api/v1/admin/users
  * 
  * @param req 
  * @param res
  */
-export const getUsersHandler = withPagination(
-    (pagination) => adminService.getUsers(pagination),
-    'Retrieved all users',
+const getUsersConfig: FilterSearchConfig = {
+  searchableFields: ['firstName', 'lastName', 'email', 'phone'],
+  filterableFields: {
+    isActive: { type: 'boolean' },
+    role: { type: 'enum', enumValues: ['admin', 'user', 'customer', 'vendor'] },
+    createdAt: { type: 'date', operators: ['range'] },
+  },
+};
+
+export const getUsersHandler = withFilterSearch(
+  (filters, pagination) => adminService.getUsers(filters, pagination),
+  getUsersConfig,
+  'Retrieved users',
 );

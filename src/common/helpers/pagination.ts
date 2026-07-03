@@ -46,5 +46,5 @@ export function buildPaginatedResponse<T>(
         next: page < totalPages ? makeLink(page + 1) : null,
     };
 
-    return { data: items, meta, links };
+    return { items, meta, links };
 }

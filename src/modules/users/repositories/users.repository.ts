@@ -1,6 +1,7 @@
 import { prisma } from '@/core/database/prisma';
 import { UpdateUserInput } from '../users.types';
 import { OtpPurpose, OtpType } from '@prisma/client';
+import { ParsedFilters } from '@/common/helpers/filter-search.types';
 
 export async function findById(id: string) {
   return prisma.user.findUnique({
@@ -77,9 +78,47 @@ export async function findUserById(id: string) {
   });
 }
 
-export async function findAllUsers(params: { skip: number; take: number }) {
+export async function findAllUsers(
+  filters: ParsedFilters,
+  params: { skip: number; take: number },
+) {
+  const where: any = {};
+
+  // Apply search (text across multiple fields)
+  if (filters.search) {
+    const { query, fields } = filters.search;
+
+    where.OR = fields.map((field) => ({
+      [field]: { contains: query, mode: 'insensitive' },
+    }));
+  }
+
+  // Apply explicit filters
+  if (filters.filters.isActive !== undefined) {
+    where.isActive = filters.filters.isActive;
+  }
+
+  if (filters.filters.role) {
+    where.roles = {
+      some: {
+        role: {
+          name: filters.filters.role,
+        },
+      },
+    };
+  }
+
+  if (filters.filters.createdAt) {
+    const range = filters.filters.createdAt as { start: Date; end: Date };
+    where.createdAt = {
+      gte: range.start,
+      lte: range.end,
+    };
+  }
+
   const [items, total] = await prisma.$transaction([
     prisma.user.findMany({
+      where,
       skip: params.skip,
       take: params.take,
       orderBy: { createdAt: 'desc' },
@@ -94,7 +133,7 @@ export async function findAllUsers(params: { skip: number; take: number }) {
         isPhoneVerified: true,
       },
     }),
-    prisma.user.count(),
+    prisma.user.count({ where }),
   ]);
   return { items, total };
 }
