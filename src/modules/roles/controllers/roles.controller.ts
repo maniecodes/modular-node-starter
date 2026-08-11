@@ -115,7 +115,7 @@ export async function checkUserPermissionHandler(
 }
 
 export const getRolePermissionsHandler = withPagination(
-  (req, pagination) => service.getRolePermissions(req.params.id as string, pagination),
+  (pagination, req) => service.getRolePermissions(req.params.id as string, pagination),
   'Retrieved all permissions for the role',
 );
 

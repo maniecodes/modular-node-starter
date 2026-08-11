@@ -97,6 +97,7 @@ function coerceFilterValue(value: string, config: any): unknown {
             // Support range values: "2024-01-01,2024-12-31"
             if (config.operators?.includes('range') && value.includes(',')) {
                 const [start, end] = value.split(',').map((v: string) => v.trim());
+                if (!start || !end) throw new AppError(`Invalid date range: ${value}`, 400);
                 const startDate = new Date(start);
                 const endDate = new Date(end);
                 if (isNaN(startDate.getTime())) throw new AppError(`Invalid start date: ${start}`, 400);
