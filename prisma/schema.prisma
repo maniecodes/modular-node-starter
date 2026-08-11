@@ -1,0 +1,217 @@
+// prisma/schema.prisma
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+enum OtpType {
+    EMAIL
+    PHONE
+}
+
+enum OtpPurpose {
+    REGISTRATION
+    PASSWORD_RESET
+}
+
+model User {
+    id              String   @id @default(cuid())
+    firstName       String
+    lastName        String
+    email           String?  @unique
+    phone           String?  @unique
+    password        String?
+    isActive        Boolean  @default(true)
+    isVerified      Boolean  @default(false)
+    isEmailVerified Boolean  @default(false)
+    isPhoneVerified Boolean  @default(false)
+    createdAt       DateTime @default(now())
+    updatedAt       DateTime @updatedAt
+
+    roles         UserRole[]
+    refreshTokens RefreshToken[]
+    resetTokens   PasswordResetToken[]
+    identities    AuthIdentity[]
+
+    @@map("users")
+}
+
+model AuthIdentity {
+    id             String   @id @default(cuid())
+    provider       String
+    providerUserId String
+    providerEmail  String?
+    userId         String
+    createdAt      DateTime @default(now())
+    updatedAt      DateTime @updatedAt
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([provider, providerUserId])
+    @@unique([provider, userId])
+    @@index([userId])
+    @@map("auth_identities")
+}
+
+model Role {
+    id          String   @id @default(cuid())
+    name        String   @unique
+    description String?
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+
+    users           UserRole[]
+    permissions     RolePermission[]
+    userInviteRoles UserInviteRole[]
+
+    @@map("roles")
+}
+
+model Permission {
+    id          String   @id @default(cuid())
+    action      String
+    resource    String
+    description String?
+    createdAt   DateTime @default(now())
+
+    roles RolePermission[]
+
+    @@unique([action, resource])
+    @@map("permissions")
+}
+
+model UserRole {
+    userId     String
+    roleId     String
+    assignedAt DateTime @default(now())
+    assignedBy String?
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+    role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+    @@id([userId, roleId])
+    @@map("user_roles")
+}
+
+model RolePermission {
+    roleId       String
+    permissionId String
+    assignedAt   DateTime @default(now())
+
+    role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+    permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+    @@id([roleId, permissionId])
+    @@map("role_permissions")
+}
+
+model RefreshToken {
+    id                 String    @id @default(cuid())
+    userId             String
+    tokenHash          String    @unique
+    familyId           String    @default(uuid())
+    usedAt             DateTime?
+    revokedAt          DateTime?
+    expiresAt          DateTime
+    requestedIp        String?
+    requestedUserAgent String?
+    createdAt          DateTime  @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([familyId])
+    @@map("refresh_tokens")
+}
+
+model AuditLog {
+    id        String   @id @default(cuid())
+    event     String // e.g. 'role_assigned', 'role_revoked', 'permission_assigned'
+    actorId   String? // userId who triggered the change (null for system actions)
+    targetId  String? // primary affected entity (userId for user-role, roleId for role-permission)
+    metadata  Json? // flexible extra context (roleName, permissionKey, etc.)
+    createdAt DateTime @default(now())
+
+    @@index([targetId])
+    @@index([event])
+    @@map("audit_logs")
+}
+
+model LoginAttempt {
+    identifier     String    @id
+    count          Int
+    firstAttemptAt DateTime
+    lockedUntil    DateTime?
+    updatedAt      DateTime  @updatedAt
+
+    @@map("login_attempts")
+}
+
+model OtpCode {
+    id                 String     @id @default(cuid())
+    target             String
+    type               OtpType
+    purpose            OtpPurpose
+    code               String
+    expiresAt          DateTime
+    usedAt             DateTime?
+    invalidatedAt      DateTime?
+    requestedIp        String?
+    requestedUserAgent String?
+    createdAt          DateTime   @default(now())
+
+    @@index([target, type, purpose])
+    @@map("otp_codes")
+}
+
+model PasswordResetToken {
+    id     String @id @default(cuid())
+    userId String
+    token  String @unique
+
+    createdAt DateTime @default(now())
+    expiresAt DateTime
+
+    usedAt    DateTime?
+    revokedAt DateTime?
+
+    ipAddress String?
+    userAgent String?
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId, token])
+    @@map("password_reset_tokens")
+}
+
+model UserInvite {
+    id    String @id @default(cuid())
+    email String
+
+    tokenHash String @unique
+
+    expiresAt DateTime
+    usedAt    DateTime?
+
+    createdBy String
+
+    createdAt DateTime @default(now())
+
+    userInviteRoles UserInviteRole[]
+
+    @@index([email])
+    @@map("user_invites")
+}
+
+model UserInviteRole {
+    inviteId String
+    roleId   String
+
+    invite UserInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+    role   Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+    @@id([inviteId, roleId])
+    @@map("user_invite_roles")
+}
